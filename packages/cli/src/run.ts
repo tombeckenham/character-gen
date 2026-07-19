@@ -10,11 +10,12 @@ import {
 } from "@character-gen/engine";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
-import { cmdCreate, cmdSheet } from "./pipeline.ts";
+import { cmdCreate } from "./create.ts";
+import { cmdSheet, cmdTurnaround } from "./pipeline.ts";
 import { cmdOpen } from "./open.ts";
 
 /** Pipeline commands that are recognized but not built yet. */
-const STUBS = new Set(["turnaround", "voice", "speak", "publish", "extract"]);
+const STUBS = new Set(["voice", "speak", "publish", "extract"]);
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */
@@ -177,6 +178,8 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdCreate(rest);
     case "sheet":
       return cmdSheet(rest);
+    case "turnaround":
+      return cmdTurnaround(rest);
     case "list":
       return cmdList(rest);
     case "show":

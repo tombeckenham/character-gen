@@ -1,8 +1,9 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { angleFromKind } from "@character-gen/engine/gallery-data";
+import { selectSpinnerFrames } from "@character-gen/engine/gallery-data";
 import type { GalleryCharacter } from "@character-gen/engine/gallery-data";
 import { StatusChips } from "./components.tsx";
 import { useGallery } from "./data.ts";
+import { TurnaroundSpinner } from "./Spinner.tsx";
 
 /** Sheet image kinds shown in the images section, in display order. */
 const SHEET_KINDS = ["master", "expression", "outfit"] as const;
@@ -74,10 +75,10 @@ export function DetailPage() {
     );
   }
 
-  // Data-contract mount points: the turnaround section becomes the
+  // Data-contract mount points: the turnaround section renders the
   // drag-to-scrub spinner fed by `angle_*` assets; the voice section plays
   // `voice_sample`/`speech` clips.
-  const angleFrames = character.assets.filter((asset) => angleFromKind(asset.kind) !== null);
+  const angleFrames = selectSpinnerFrames(character.assets);
   const voiceAssets = character.assets.filter(
     (asset) => asset.kind === "voice_sample" || asset.kind === "speech",
   );
@@ -105,11 +106,11 @@ export function DetailPage() {
 
       <section data-mount="turnaround">
         <h2 className="section-title">Turnaround</h2>
-        <p className="empty">
-          {angleFrames.length > 0
-            ? `${angleFrames.length} frames ready — spinner coming soon.`
-            : "Not generated yet."}
-        </p>
+        {angleFrames.length > 0 ? (
+          <TurnaroundSpinner frames={angleFrames} name={character.name} />
+        ) : (
+          <p className="empty">Not generated yet.</p>
+        )}
       </section>
 
       <section data-mount="voice">

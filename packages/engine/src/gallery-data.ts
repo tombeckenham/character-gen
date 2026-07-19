@@ -25,6 +25,14 @@ export type {
   StepState,
   TurnaroundAngle,
 } from "./types.ts";
+export {
+  DRAG_PIXELS_PER_FRAME,
+  frameIndexFromDrag,
+  frameIndexFromWheel,
+  selectSpinnerFrames,
+  wrapFrameIndex,
+} from "./spinner.ts";
+export type { SpinnerFrame } from "./spinner.ts";
 
 /** How often the gallery page re-injects `data.js` looking for a new version. */
 export const POLL_INTERVAL_MS = 2000;

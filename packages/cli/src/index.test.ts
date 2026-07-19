@@ -132,7 +132,7 @@ test("show prints a seeded character's profile and assets", async () => {
 });
 
 test("an unimplemented pipeline command exits 1 with a coming-soon note", () => {
-  const res = runCli(["turnaround", "someone"]);
+  const res = runCli(["voice", "someone"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /coming soon/u);
 });
@@ -216,9 +216,28 @@ test("create --profile-json with an invalid profile shape exits 1", () => {
 });
 
 test("create --steps with a recognized-but-unimplemented step exits 1", () => {
-  const res = runCli(["create", "someone", "--steps", "turnaround"]);
+  const res = runCli(["create", "someone", "--steps", "voice"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /recognized but not implemented/u);
+});
+
+test("create --steps accepts turnaround (fails at the key, not the step list)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const res = runCliIn(dir, ["create", "someone", "--steps", "profile,sheet,turnaround"]);
+    assert.equal(res.status, 1);
+    assert.doesNotMatch(res.stderr, /Unknown step|not implemented/u);
+    assert.match(res.stdout, /Created someone/u);
+    assert.match(res.stderr, /No fal API key found/u);
+    const db = openDatabase(join(dir, "db.sqlite"));
+    try {
+      assert.ok(await db.getCharacter("someone"));
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("create --steps with an unknown step exits 1", () => {
@@ -308,6 +327,42 @@ test("sheet without an argument exits 1 with usage", () => {
   const res = runCli(["sheet"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /Usage: character-gen sheet/u);
+});
+
+test("turnaround without an argument exits 1 with usage", () => {
+  const res = runCli(["turnaround"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Usage: character-gen turnaround/u);
+});
+
+test("turnaround on an unknown character exits 1", () => {
+  const res = runCli(["turnaround", "ghost"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /No character found/u);
+});
+
+test("turnaround on an existing character with no key exits 1 with a setup hint", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const db = openDatabase(join(dir, "db.sqlite"));
+    await db.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile: { name: "Isolde", identifier: "isolde-keeper" },
+    });
+    db.close();
+    const res = runCliIn(dir, ["turnaround", "isolde-keeper"]);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /No fal API key found/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("root help lists turnaround as available (not coming soon)", () => {
+  const res = runCli(["--help"]);
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /turnaround <char>\s+Generate the 8-angle spin frames\n/u);
 });
 
 /** Seeds a minimal already-opened gallery so refresh/open work without dist. */
