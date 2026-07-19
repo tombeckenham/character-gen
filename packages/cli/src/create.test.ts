@@ -4,12 +4,19 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "@character-gen/engine";
-import type { AngleGenerator, ImageGenerator } from "@character-gen/engine";
+import type { AngleGenerator, ImageGenerator, VoiceGenerator } from "@character-gen/engine";
 import { cmdCreate } from "./create.ts";
 
 const failingImageGenerator: ImageGenerator = {
   generate: () => Promise.reject(new Error("master boom")),
   edit: () => Promise.reject(new Error("edit boom")),
+};
+
+/** These runs never include the voice step, but `create` resolves all step
+ * generators together — so injecting one keeps the run offline (no key needed). */
+const unusedVoiceGenerator: VoiceGenerator = {
+  design: () => Promise.reject(new Error("no voice in this run")),
+  speak: () => Promise.reject(new Error("no speak in this run")),
 };
 
 test("a failed sheet short-circuits the turnaround: no angle generation is ever attempted", async () => {
@@ -31,6 +38,7 @@ test("a failed sheet short-circuits the turnaround: no angle generation is ever 
         env: { CHARACTER_GEN_HOME: dir } as NodeJS.ProcessEnv,
         imageGenerator: failingImageGenerator,
         angleGenerator,
+        voiceGenerator: unusedVoiceGenerator,
       },
     );
 
@@ -89,6 +97,7 @@ test("create --tier rich runs the core sheet then the rich passes", async () => 
         angleGenerator: {
           angle: () => Promise.reject(new Error("no turnaround in this run")),
         },
+        voiceGenerator: unusedVoiceGenerator,
       },
     );
 
@@ -163,6 +172,7 @@ test("with working generators create runs sheet then turnaround to done", async 
         env: { CHARACTER_GEN_HOME: dir } as NodeJS.ProcessEnv,
         imageGenerator,
         angleGenerator,
+        voiceGenerator: unusedVoiceGenerator,
       },
     );
 

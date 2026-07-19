@@ -120,6 +120,7 @@ export const IMPLEMENTED_STEPS = [
   "profile",
   "sheet",
   "turnaround",
+  "voice",
 ] as const satisfies readonly PipelineStep[];
 
 export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];

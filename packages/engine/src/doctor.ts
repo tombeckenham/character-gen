@@ -53,6 +53,29 @@ export interface DoctorOptions {
 }
 
 /**
+ * Reads the whole store once, reporting corrupt character folders (surfaced as
+ * scan warnings) as unhealthy with the folders named. A missing charactersDir
+ * reads as an empty store — the doctor must not create folders in the user's
+ * cwd just by being run.
+ */
+async function checkStore(
+  charactersDir: string,
+): Promise<{ storeOk: boolean; storeError: string | null }> {
+  try {
+    const warnings: string[] = [];
+    const store = openStore(charactersDir, { onWarn: (m) => warnings.push(m) });
+    try {
+      await store.listCharacters();
+      return { storeOk: warnings.length === 0, storeError: warnings.join("; ") || null };
+    } finally {
+      store.close();
+    }
+  } catch (err) {
+    return { storeOk: false, storeError: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Gathers the doctor report: Node version, active key source, fal ping, state
  * dir path, and character-store readability. `healthy` is true only when Node
  * is new enough, a key resolved and pinged OK, and the store read cleanly.
@@ -74,24 +97,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     ping = await pingFal(key.key, options.fetchImpl ? { fetchImpl: options.fetchImpl } : {});
   }
 
-  let storeOk = false;
-  let storeError: string | null = null;
-  try {
-    // A missing charactersDir reads as an empty store — the doctor must not
-    // create folders in the user's cwd just by being run. Corrupt character
-    // folders surface as scan warnings; the doctor's job is to name them.
-    const warnings: string[] = [];
-    const store = openStore(paths.charactersDir, { onWarn: (m) => warnings.push(m) });
-    try {
-      await store.listCharacters();
-      storeOk = warnings.length === 0;
-      storeError = warnings.length > 0 ? warnings.join("; ") : null;
-    } finally {
-      store.close();
-    }
-  } catch (err) {
-    storeError = err instanceof Error ? err.message : String(err);
-  }
+  const { storeOk, storeError } = await checkStore(paths.charactersDir);
 
   const healthy = nodeOk && key.ok && ping !== null && ping.ok && storeOk;
   const keySource = key.ok ? key.source : null;

@@ -189,7 +189,9 @@ test("runTurnaround survives a throwing onFrame sink: all frames land, warning r
       fetchImpl: fakeFetch(),
       angles: [0, 45, 90],
       onProgress: (m) => messages.push(m),
-      onFrame: () => Promise.reject(new Error("sink boom")),
+      // Distinct messages per frame so the deduped reporter (which collapses
+      // consecutive identical lines) doesn't merge concurrent warnings.
+      onFrame: (frame) => Promise.reject(new Error(`sink boom ${frame.kind}`)),
     });
 
     assert.equal(outcome.frames.length, 3);
@@ -364,10 +366,12 @@ test("runTurnaround shoots from the newest master when the sheet was re-run", as
   }
 });
 
-test("runTurnaround on a mid-sequence failure keeps earlier frames and marks error", async () => {
+test("runTurnaround with one failing angle keeps the others and marks error", async () => {
   const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
+    // The generator fails the 3rd angle it is called with; workers start in
+    // angle order, so that is angle 90.
     const { generator } = fakeGenerator({ failIndex: 2 });
 
     await assert.rejects(
@@ -378,22 +382,22 @@ test("runTurnaround on a mid-sequence failure keeps earlier frames and marks err
           fetchImpl: fakeFetch(),
           angles: [0, 45, 90, 135],
         }),
-      /angle 90 boom/u,
+      /turnaround: 1 of 4 angles failed — 90° \(angle 90 boom\)/u,
     );
 
     const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "error");
 
-    // The clean prefix of completed frames survives, request_ids intact.
+    // Every angle but the failed one landed with its request id (arrival order
+    // isn't deterministic under concurrency, so compare by kind).
     const stored = await store.getAssets(character.id);
-    const frames = stored.filter((a) => a.kind.startsWith("angle_"));
-    assert.deepEqual(
-      frames.map((f) => [f.kind, f.falRequestId]),
-      [
-        ["angle_0", "req-angle-0"],
-        ["angle_45", "req-angle-45"],
-      ],
+    const byKind = new Map(
+      stored.filter((a) => a.kind.startsWith("angle_")).map((a) => [a.kind, a.falRequestId]),
     );
+    assert.equal(byKind.get("angle_0"), "req-angle-0");
+    assert.equal(byKind.get("angle_45"), "req-angle-45");
+    assert.equal(byKind.get("angle_135"), "req-angle-135");
+    assert.equal(byKind.has("angle_90"), false);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });
@@ -408,13 +412,7 @@ test("runTurnaround persists the request_id when a frame download fails (row sur
     const fetchImpl = fakeFetch(new Set(["https://fal.media/angle-45.png"]));
 
     await assert.rejects(
-      () =>
-        runTurnaround(character, {
-          store,
-          generator,
-          fetchImpl,
-          angles: [0, 45, 90],
-        }),
+      () => runTurnaround(character, { store, generator, fetchImpl, angles: [0, 45, 90] }),
       /Failed to download image \(HTTP 404\)/u,
     );
 
@@ -424,13 +422,13 @@ test("runTurnaround persists the request_id when a frame download fails (row sur
     const stored = await store.getAssets(character.id);
     const angle0 = stored.find((a) => a.kind === "angle_0");
     const angle45 = stored.find((a) => a.kind === "angle_45");
-    assert.ok(angle0?.localPath, "first frame downloaded and has a path");
+    const angle90 = stored.find((a) => a.kind === "angle_90");
+    // The two that downloaded cleanly land with paths; the 404'd frame keeps its
+    // billed request id with a null path. Concurrency means angle_90 runs too.
+    assert.ok(angle0?.localPath, "angle 0 downloaded and has a path");
+    assert.ok(angle90?.localPath, "angle 90 downloaded and has a path");
     assert.equal(angle45?.falRequestId, "req-angle-45");
     assert.equal(angle45?.localPath, null);
-    assert.equal(
-      stored.some((a) => a.kind === "angle_90"),
-      false,
-    );
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

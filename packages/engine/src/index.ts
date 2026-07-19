@@ -13,6 +13,7 @@ export * from "./publish-priority.ts";
 export * from "./steps/sheet.ts";
 export * from "./steps/passes.ts";
 export * from "./steps/turnaround.ts";
+export * from "./steps/voice.ts";
 export * from "./gallery.ts";
 // gallery-data re-exports types.ts names; explicit exports avoid the ambiguity
 // a second `export *` would create for those shared bindings.
