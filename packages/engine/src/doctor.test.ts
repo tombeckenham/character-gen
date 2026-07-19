@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeVersionOk, runDoctor } from "./doctor.ts";
@@ -100,6 +100,35 @@ test("runDoctor reports a store failure when the characters path is unreadable",
     assert.equal(report.storeOk, false);
     assert.ok(report.storeError && report.storeError.length > 0);
     assert.equal(report.healthy, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runDoctor names a corrupt character folder and reports the store unhealthy", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-doctor-"));
+  try {
+    const brokenDir = join(dir, "characters", "broken");
+    mkdirSync(brokenDir, { recursive: true });
+    writeFileSync(join(brokenDir, "character.json"), "not json");
+    const report = await runDoctor({
+      env: { FAL_KEY: "env-key", CHARACTER_GEN_HOME: dir },
+      fetchImpl: okFetch(),
+    });
+    assert.equal(report.storeOk, false);
+    assert.ok(report.storeError);
+    assert.match(report.storeError, /broken/u);
+    assert.equal(report.healthy, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runDoctor never creates the characters directory just by being run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-doctor-"));
+  try {
+    await runDoctor({ env: { FAL_KEY: "env-key", CHARACTER_GEN_HOME: dir }, fetchImpl: okFetch() });
+    assert.equal(existsSync(join(dir, "characters")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

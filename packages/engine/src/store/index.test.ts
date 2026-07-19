@@ -1,7 +1,16 @@
 // oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHARACTER_FILE, DuplicateIdentifierError, openStore } from "./index.ts";
@@ -19,6 +28,12 @@ const profile: CharacterProfile = {
   visualCanon: "silver braid, oilskin coat, lantern-scarred hands",
   voiceDescription: "low, salt-worn, deliberate",
 };
+
+/** The shared profile re-keyed for another identifier (insertCharacter
+ * enforces profile.identifier === identifier). */
+function profileFor(identifier: string): CharacterProfile {
+  return { ...profile, identifier };
+}
 
 test("insert then get a character by id and by identifier, round-tripping JSON", async () => {
   const { charactersDir, dir } = tmpCharactersDir();
@@ -158,7 +173,7 @@ test("data persists across store reopens", async () => {
   const created = await store1.insertCharacter({
     identifier: "persist-me",
     name: "Persist",
-    profile,
+    profile: profileFor("persist-me"),
   });
   store1.close();
 
@@ -179,8 +194,18 @@ test("listCharacters returns newest first (deterministic via explicit createdAt)
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
   try {
-    await store.insertCharacter({ identifier: "one", name: "One", profile, createdAt: 1000 });
-    await store.insertCharacter({ identifier: "two", name: "Two", profile, createdAt: 2000 });
+    await store.insertCharacter({
+      identifier: "one",
+      name: "One",
+      profile: profileFor("one"),
+      createdAt: 1000,
+    });
+    await store.insertCharacter({
+      identifier: "two",
+      name: "Two",
+      profile: profileFor("two"),
+      createdAt: 2000,
+    });
     const all = await store.listCharacters();
     assert.deepEqual(
       all.map((c) => c.identifier),
@@ -196,8 +221,18 @@ test("listCharacters breaks same-millisecond ties by identifier", async () => {
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
   try {
-    await store.insertCharacter({ identifier: "zed", name: "Zed", profile, createdAt: 5000 });
-    await store.insertCharacter({ identifier: "abel", name: "Abel", profile, createdAt: 5000 });
+    await store.insertCharacter({
+      identifier: "zed",
+      name: "Zed",
+      profile: profileFor("zed"),
+      createdAt: 5000,
+    });
+    await store.insertCharacter({
+      identifier: "abel",
+      name: "Abel",
+      profile: profileFor("abel"),
+      createdAt: 5000,
+    });
     const all = await store.listCharacters();
     assert.deepEqual(
       all.map((c) => c.identifier),
@@ -362,7 +397,11 @@ test("JSON writes go through tmp + rename and leave no temp files behind", async
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
   try {
-    const created = await store.insertCharacter({ identifier: "tidy", name: "Tidy", profile });
+    const created = await store.insertCharacter({
+      identifier: "tidy",
+      name: "Tidy",
+      profile: profileFor("tidy"),
+    });
     await store.setStepState(created.id, "sheet", "done");
     const files = readdirSync(join(charactersDir, "tidy"));
     assert.deepEqual(files, [CHARACTER_FILE]);
@@ -375,7 +414,7 @@ test("JSON writes go through tmp + rename and leave no temp files behind", async
 test("reading a corrupt character.json (blank name/identifier) throws a clear error", async () => {
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
-  await store.insertCharacter({ identifier: "ok", name: "Ok", profile });
+  await store.insertCharacter({ identifier: "ok", name: "Ok", profile: profileFor("ok") });
   // Corrupt the persisted profile out-of-band (blank name/identifier).
   writeFileSync(
     join(charactersDir, "ok", CHARACTER_FILE),
@@ -402,7 +441,11 @@ test("reading a corrupt character.json (blank name/identifier) throws a clear er
 test("a partial or bogus persisted status normalizes to a full status on read", async () => {
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
-  const created = await store.insertCharacter({ identifier: "norm", name: "Norm", profile });
+  const created = await store.insertCharacter({
+    identifier: "norm",
+    name: "Norm",
+    profile: profileFor("norm"),
+  });
   // Write a status blob missing keys and carrying a bogus value/extra key.
   const file = join(charactersDir, "norm", CHARACTER_FILE);
   const stored = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -430,11 +473,242 @@ test("a stray file or json-less folder in charactersDir is ignored, not an error
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
   try {
-    await store.insertCharacter({ identifier: "real", name: "Real", profile });
+    await store.insertCharacter({ identifier: "real", name: "Real", profile: profileFor("real") });
     writeFileSync(join(charactersDir, ".DS_Store"), "junk");
     rmSync(join(charactersDir, "real", CHARACTER_FILE));
     const all = await store.listCharacters();
     assert.deepEqual(all, []);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("insertCharacter rejects a profile whose identifier disagrees with the top level", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    await assert.rejects(
+      () =>
+        store.insertCharacter({
+          identifier: "isolde-keeper",
+          name: "I",
+          profile: profileFor("someone-else"),
+        }),
+      /profile\.identifier "someone-else" does not match identifier "isolde-keeper"/u,
+    );
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid JSON in character.json throws an error naming the file", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  await store.insertCharacter({
+    identifier: "broken",
+    name: "Broken",
+    profile: profileFor("broken"),
+  });
+  writeFileSync(join(charactersDir, "broken", CHARACTER_FILE), '{ "identifier": "broken", <<<<<<<');
+  try {
+    await assert.rejects(
+      () => store.getCharacter("broken"),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /invalid JSON in .*broken/u);
+        assert.match(err.message, new RegExp(CHARACTER_FILE, "u"));
+        return true;
+      },
+    );
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("one corrupt neighbor is skipped with a warning; healthy characters keep working", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const warnings: string[] = [];
+  const store = openStore(charactersDir, { onWarn: (m) => warnings.push(m) });
+  try {
+    const healthy = await store.insertCharacter({
+      identifier: "healthy",
+      name: "Healthy",
+      profile: profileFor("healthy"),
+    });
+    await store.insertCharacter({
+      identifier: "broken",
+      name: "Broken",
+      profile: profileFor("broken"),
+    });
+    writeFileSync(join(charactersDir, "broken", CHARACTER_FILE), "not json at all");
+
+    // list keeps working and reports the corrupt folder instead of throwing.
+    const all = await store.listCharacters();
+    assert.deepEqual(
+      all.map((c) => c.identifier),
+      ["healthy"],
+    );
+    assert.ok(warnings.some((w) => /skipping broken/u.test(w)));
+
+    // uuid-keyed writes on the healthy character (the billed-request_id path)
+    // must survive the corrupt neighbor.
+    const asset = await store.insertAsset({
+      characterId: healthy.id,
+      kind: "master",
+      falRequestId: "req-1",
+    });
+    const patched = await store.setAssetLocalPath(
+      asset.id,
+      join(charactersDir, "healthy", "master-1.png"),
+    );
+    assert.equal(patched.falRequestId, "req-1");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a renamed folder whose character.json disagrees fails loudly instead of forking", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  await store.insertCharacter({
+    identifier: "old-name",
+    name: "Old",
+    profile: profileFor("old-name"),
+  });
+  renameSync(join(charactersDir, "old-name"), join(charactersDir, "new-name"));
+  try {
+    await assert.rejects(
+      () => store.getCharacter("new-name"),
+      /says identifier "old-name" but the folder is named "new-name"/u,
+    );
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setAssetLocalPath stores an in-folder path relative and returns it absolute", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    const character = await store.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile,
+    });
+    // The real pipeline inserts with no path and patches it in after download.
+    const asset = await store.insertAsset({
+      characterId: character.id,
+      kind: "master",
+      localPath: null,
+    });
+    const absolute = join(charactersDir, "isolde-keeper", "master-1.png");
+    const patched = await store.setAssetLocalPath(asset.id, absolute);
+    assert.equal(patched.localPath, absolute);
+    const raw = readFileSync(join(charactersDir, "isolde-keeper", CHARACTER_FILE), "utf8");
+    const stored = JSON.parse(raw) as { assets: Array<{ localPath: string }> };
+    assert.equal(stored.assets[0]?.localPath, "master-1.png");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setAssetLocalPath patches the owning character only, never a neighbor", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    const first = await store.insertCharacter({
+      identifier: "first",
+      name: "First",
+      profile: profileFor("first"),
+    });
+    const second = await store.insertCharacter({
+      identifier: "second",
+      name: "Second",
+      profile: profileFor("second"),
+    });
+    await store.insertAsset({ characterId: first.id, kind: "master" });
+    const target = await store.insertAsset({ characterId: second.id, kind: "master" });
+    const before = readFileSync(join(charactersDir, "first", CHARACTER_FILE), "utf8");
+
+    await store.setAssetLocalPath(target.id, join(charactersDir, "second", "master-1.png"));
+
+    assert.equal(
+      (await store.getAssets(second.id))[0]?.localPath,
+      join(charactersDir, "second", "master-1.png"),
+    );
+    assert.equal((await store.getAssets(first.id))[0]?.localPath, null);
+    assert.equal(readFileSync(join(charactersDir, "first", CHARACTER_FILE), "utf8"), before);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an asset path outside the character folder is kept absolute with a warning", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const warnings: string[] = [];
+  const store = openStore(charactersDir, { onWarn: (m) => warnings.push(m) });
+  try {
+    const character = await store.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile,
+    });
+    const outside = join(dir, "elsewhere", "master.png");
+    await store.insertAsset({ characterId: character.id, kind: "master", localPath: outside });
+    assert.equal((await store.getAssets(character.id))[0]?.localPath, outside);
+    assert.ok(warnings.some((w) => /not be portable/u.test(w)));
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a create into an existing json-less folder adopts it and keeps its files", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    mkdirSync(join(charactersDir, "adopted"), { recursive: true });
+    writeFileSync(join(charactersDir, "adopted", "stray.png"), "bytes");
+    await store.insertCharacter({
+      identifier: "adopted",
+      name: "Adopted",
+      profile: profileFor("adopted"),
+    });
+    assert.ok(existsSync(join(charactersDir, "adopted", CHARACTER_FILE)));
+    assert.equal(readFileSync(join(charactersDir, "adopted", "stray.png"), "utf8"), "bytes");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("read-only operations never create the characters directory", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    assert.deepEqual(await store.listCharacters(), []);
+    assert.equal(await store.getCharacter("nobody"), null);
+    assert.deepEqual(await store.getAssets("nobody"), []);
+    assert.equal(existsSync(charactersDir), false);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("characterDir returns the media folder and rejects invalid identifiers", async () => {
+  const { charactersDir, dir } = tmpCharactersDir();
+  const store = openStore(charactersDir);
+  try {
+    assert.equal(store.characterDir("isolde-keeper"), join(charactersDir, "isolde-keeper"));
+    assert.throws(() => store.characterDir("../evil"), /invalid identifier/u);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

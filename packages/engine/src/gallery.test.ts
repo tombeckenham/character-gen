@@ -44,7 +44,7 @@ function setup(): Ctx {
   writeFileSync(spaHtmlPath, "<!doctype html><title>spa</title>");
   return {
     dir,
-    store: openStore(join(dir, "characters")),
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
     galleryDir: join(dir, "gallery"),
     spaHtmlPath,
     warnings: [],

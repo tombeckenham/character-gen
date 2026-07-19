@@ -78,11 +78,14 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   let storeError: string | null = null;
   try {
     // A missing charactersDir reads as an empty store — the doctor must not
-    // create folders in the user's cwd just by being run.
-    const store = openStore(paths.charactersDir);
+    // create folders in the user's cwd just by being run. Corrupt character
+    // folders surface as scan warnings; the doctor's job is to name them.
+    const warnings: string[] = [];
+    const store = openStore(paths.charactersDir, { onWarn: (m) => warnings.push(m) });
     try {
       await store.listCharacters();
-      storeOk = true;
+      storeOk = warnings.length === 0;
+      storeError = warnings.length > 0 ? warnings.join("; ") : null;
     } finally {
       store.close();
     }

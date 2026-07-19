@@ -216,7 +216,7 @@ export async function runSheetPasses(
   deps: RunSheetPassesDeps,
 ): Promise<SheetPassesOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.charactersDir, "sheet");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "sheet");
   const passes = SHEET_PASSES.filter((pass) => deps.passes.includes(pass));
   const detailCap = deps.detailCap ?? MAX_DETAIL_MACROS;
 

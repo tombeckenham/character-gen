@@ -142,7 +142,7 @@ export interface SheetOutcome {
 
 /**
  * Generates the master reference image and the default derived variants for a
- * character, downloading each to `<charactersDir>/<identifier>/` and recording an
+ * character, downloading each to `characters/<identifier>/` and recording an
  * asset record (with the fal request id) per image. Marks the `sheet` status
  * running → done (it may re-run from a prior done/error, so it does not assume
  * "pending"). On failure, marks the step `error` and rethrows, leaving any
@@ -153,7 +153,7 @@ export async function runSheet(
   deps: RunSheetDeps,
 ): Promise<SheetOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.charactersDir, "sheet");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "sheet");
 
   return await withStepStatus(deps.store, character.id, "sheet", report, async () => {
     report("master: generating reference image…");

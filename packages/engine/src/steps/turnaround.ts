@@ -82,7 +82,7 @@ export async function findMasterUrl(
 
 /**
  * Generates the turnaround frames — one image per angle, shot from the master —
- * downloading each to `<charactersDir>/<identifier>/` and recording an asset record
+ * downloading each to `characters/<identifier>/` and recording an asset record
  * (kind `angle_<deg>`, with the fal request id) per frame. Marks the
  * `turnaround` status running → done; on failure marks it `error` and rethrows,
  * leaving frames already produced intact. Requires a completed sheet step (a
@@ -96,7 +96,7 @@ export async function runTurnaround(
   deps: RunTurnaroundDeps,
 ): Promise<TurnaroundOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.charactersDir, "turnaround");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "turnaround");
   const angles = deps.angles ?? TURNAROUND_ANGLES;
 
   const masterUrl = await findMasterUrl(deps.store, character.id);

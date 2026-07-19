@@ -59,7 +59,11 @@ function fakeFetch(notFound: Set<string> = new Set()): FetchImpl {
 
 function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-sheet-"));
-  return { store: openStore(join(dir, "characters")), dir, charactersDir: join(dir, "characters") };
+  return {
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
+    dir,
+    charactersDir: join(dir, "characters"),
+  };
 }
 
 function seedCharacter(store: CharacterStore): Promise<CharacterRecord> {
@@ -86,7 +90,6 @@ test("runSheet generates master + variants, writes files, and records assets", a
     const outcome = await runSheet(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       onProgress: (m) => messages.push(m),
     });
@@ -103,7 +106,7 @@ test("runSheet generates master + variants, writes files, and records assets", a
       "https://fal.media/master.png",
     ]);
 
-    // Outcome + DB rows carry the fal request ids.
+    // Outcome + stored asset records carry the fal request ids.
     assert.equal(outcome.master.kind, "master");
     assert.equal(outcome.master.falRequestId, "req-master");
     assert.equal(outcome.variants.length, 2);
@@ -144,7 +147,7 @@ test("runSheet generates master + variants, writes files, and records assets", a
 });
 
 test("runSheet marks the step done and preserves the profile step", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const created = await store.insertCharacter({
       identifier: "isolde-keeper",
@@ -159,7 +162,7 @@ test("runSheet marks the step done and preserves the profile step", async () => 
       },
     });
     const { generator } = fakeGenerator();
-    await runSheet(created, { store, generator, charactersDir, fetchImpl: fakeFetch() });
+    await runSheet(created, { store, generator, fetchImpl: fakeFetch() });
     const refreshed = await store.getCharacter(created.id);
     assert.equal(refreshed?.status.profile, "done");
     assert.equal(refreshed?.status.sheet, "done");
@@ -170,14 +173,14 @@ test("runSheet marks the step done and preserves the profile step", async () => 
 });
 
 test("runSheet on a fal failure sets status error and keeps prior assets", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     // Fail the second edit (the outfit); master + expression should survive.
     const { generator } = fakeGenerator({ failEditIndex: 1 });
 
     await assert.rejects(
-      () => runSheet(character, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runSheet(character, { store, generator, fetchImpl: fakeFetch() }),
       /edit 1 boom/u,
     );
 
@@ -196,13 +199,13 @@ test("runSheet on a fal failure sets status error and keeps prior assets", async
 });
 
 test("runSheet on a master generate failure records zero assets, status error", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator({ failGenerate: true });
 
     await assert.rejects(
-      () => runSheet(character, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runSheet(character, { store, generator, fetchImpl: fakeFetch() }),
       /master boom/u,
     );
 
@@ -216,7 +219,7 @@ test("runSheet on a master generate failure records zero assets, status error", 
 });
 
 test("runSheet persists the request_id when the download fails (row survives, path null)", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
@@ -224,7 +227,7 @@ test("runSheet persists the request_id when the download fails (row survives, pa
     const fetchImpl = fakeFetch(new Set(["https://fal.media/master.png"]));
 
     await assert.rejects(
-      () => runSheet(character, { store, generator, charactersDir, fetchImpl }),
+      () => runSheet(character, { store, generator, fetchImpl }),
       /Failed to download image \(HTTP 404\)/u,
     );
 
@@ -244,7 +247,7 @@ test("runSheet persists the request_id when the download fails (row survives, pa
 });
 
 test("runSheet keeps the failed variant's request_id and the master intact on variant download 404", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
@@ -252,7 +255,7 @@ test("runSheet keeps the failed variant's request_id and the master intact on va
     const fetchImpl = fakeFetch(new Set(["https://fal.media/edit-0.png"]));
 
     await assert.rejects(
-      () => runSheet(character, { store, generator, charactersDir, fetchImpl }),
+      () => runSheet(character, { store, generator, fetchImpl }),
       /Failed to download image \(HTTP 404\)/u,
     );
 
@@ -270,7 +273,7 @@ test("runSheet keeps the failed variant's request_id and the master intact on va
 });
 
 test("runSheet persists the running state before generation begins", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     let stateDuringGenerate: string | undefined;
@@ -284,7 +287,7 @@ test("runSheet persists the running state before generation begins", async () =>
         return Promise.resolve({ requestId: "req-edit", url: "https://fal.media/edit.png" });
       },
     };
-    await runSheet(character, { store, generator, charactersDir, fetchImpl: fakeFetch() });
+    await runSheet(character, { store, generator, fetchImpl: fakeFetch() });
     assert.equal(stateDuringGenerate, "running");
   } finally {
     store.close();
@@ -293,13 +296,13 @@ test("runSheet persists the running state before generation begins", async () =>
 });
 
 test("runSheet refuses an invalid identifier before any file work", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const hostile = { ...character, identifier: "../escape" };
     const { generator, calls } = fakeGenerator();
     await assert.rejects(
-      () => runSheet(hostile, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runSheet(hostile, { store, generator, fetchImpl: fakeFetch() }),
       /invalid identifier/u,
     );
     assert.equal(calls.length, 0, "no generation attempted for a bad identifier");

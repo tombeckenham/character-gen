@@ -24,12 +24,11 @@ export interface GenProgress {
   status: string;
 }
 
-/** The dependencies every media-producing step shares. */
+/** The dependencies every media-producing step shares. Media locations come
+ * from the store itself (`store.characterDir`), so a step can never write
+ * files to a different root than the one character.json paths resolve against. */
 export interface StepMediaDeps {
   store: CharacterStore;
-  /** Character folders root; per-character files go under
-   * `<charactersDir>/<identifier>/` next to character.json. */
-  charactersDir: string;
   /** Injectable downloader so tests avoid the network (defaults to global fetch). */
   fetchImpl?: FetchImpl;
   /** Per-asset download timeout (defaults to DEFAULT_DOWNLOAD_TIMEOUT_MS). */
@@ -73,7 +72,7 @@ export function dedupedReporter(sink?: (message: string) => void): (message: str
  */
 export function ensureCharacterMediaDir(
   character: CharacterRecord,
-  charactersDir: string,
+  store: CharacterStore,
   step: PipelineStep,
 ): string {
   if (!isValidIdentifier(character.identifier)) {
@@ -81,7 +80,7 @@ export function ensureCharacterMediaDir(
       `Refusing to run ${step} for an invalid identifier: "${character.identifier}".`,
     );
   }
-  const charDir = join(charactersDir, character.identifier);
+  const charDir = store.characterDir(character.identifier);
   mkdirSync(charDir, { recursive: true });
   return charDir;
 }

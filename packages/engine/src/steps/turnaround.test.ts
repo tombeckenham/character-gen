@@ -50,7 +50,11 @@ function fakeFetch(notFound: Set<string> = new Set()): FetchImpl {
 
 function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-turnaround-"));
-  return { store: openStore(join(dir, "characters")), dir, charactersDir: join(dir, "characters") };
+  return {
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
+    dir,
+    charactersDir: join(dir, "characters"),
+  };
 }
 
 async function seedCharacter(store: CharacterStore, withMaster = true): Promise<CharacterRecord> {
@@ -82,7 +86,6 @@ test("runTurnaround generates all 12 angles from the master and records assets i
     const outcome = await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       onProgress: (m) => messages.push(m),
     });
@@ -121,7 +124,7 @@ test("runTurnaround generates all 12 angles from the master and records assets i
 });
 
 test("runTurnaround accepts an angle subset (cheap test runs)", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator, calls } = fakeGenerator();
@@ -129,7 +132,6 @@ test("runTurnaround accepts an angle subset (cheap test runs)", async () => {
     const outcome = await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       angles: [90, 270],
     });
@@ -151,7 +153,7 @@ test("runTurnaround accepts an angle subset (cheap test runs)", async () => {
 });
 
 test("runTurnaround reports each stored frame through onFrame as it lands", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
@@ -160,7 +162,6 @@ test("runTurnaround reports each stored frame through onFrame as it lands", asyn
     await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       angles: [0, 45, 90],
       onFrame: (frame) => {
@@ -176,7 +177,7 @@ test("runTurnaround reports each stored frame through onFrame as it lands", asyn
 });
 
 test("runTurnaround survives a throwing onFrame sink: all frames land, warning reported", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
@@ -185,7 +186,6 @@ test("runTurnaround survives a throwing onFrame sink: all frames land, warning r
     const outcome = await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       angles: [0, 45, 90],
       onProgress: (m) => messages.push(m),
@@ -203,14 +203,13 @@ test("runTurnaround survives a throwing onFrame sink: all frames land, warning r
 });
 
 test("runTurnaround generates a caller-supplied angle list in its given order", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator, calls } = fakeGenerator();
     const outcome = await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       angles: [180, 0, 90],
     });
@@ -229,7 +228,7 @@ test("runTurnaround generates a caller-supplied angle list in its given order", 
 });
 
 test("a failing error-status write is warned about and the work error still surfaces", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     // The status DB dies exactly when the step tries to record its failure.
@@ -248,7 +247,6 @@ test("a failing error-status write is warned about and the work error still surf
         runTurnaround(character, {
           store: flakyDb,
           generator,
-          charactersDir,
           fetchImpl: fakeFetch(),
           angles: [0],
           onProgress: (m) => messages.push(m),
@@ -267,7 +265,7 @@ test("a failing error-status write is warned about and the work error still surf
 });
 
 test("a failing done-status write surfaces as the step error with frames intact", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const flakyDb: CharacterStore = {
@@ -284,7 +282,6 @@ test("a failing done-status write surfaces as the step error with frames intact"
         runTurnaround(character, {
           store: flakyDb,
           generator,
-          charactersDir,
           fetchImpl: fakeFetch(),
           angles: [0, 45],
         }),
@@ -307,13 +304,13 @@ test("a failing done-status write surfaces as the step error with frames intact"
 });
 
 test("runTurnaround without a master errors clearly, runs nothing, keeps status pending", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store, false);
     const { generator, calls } = fakeGenerator();
 
     await assert.rejects(
-      () => runTurnaround(character, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(character, { store, generator, fetchImpl: fakeFetch() }),
       /No master image found.*character-gen sheet isolde-keeper/u,
     );
 
@@ -328,13 +325,13 @@ test("runTurnaround without a master errors clearly, runs nothing, keeps status 
 });
 
 test("runTurnaround treats a master row without a URL as missing", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store, false);
     await store.insertAsset({ characterId: character.id, kind: "master", falRequestId: "req-m" });
     const { generator } = fakeGenerator();
     await assert.rejects(
-      () => runTurnaround(character, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(character, { store, generator, fetchImpl: fakeFetch() }),
       /No master image found/u,
     );
   } finally {
@@ -344,7 +341,7 @@ test("runTurnaround treats a master row without a URL as missing", async () => {
 });
 
 test("runTurnaround shoots from the newest master when the sheet was re-run", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     await store.insertAsset({
@@ -357,7 +354,6 @@ test("runTurnaround shoots from the newest master when the sheet was re-run", as
     await runTurnaround(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch(),
       angles: [0],
     });
@@ -369,7 +365,7 @@ test("runTurnaround shoots from the newest master when the sheet was re-run", as
 });
 
 test("runTurnaround on a mid-sequence failure keeps earlier frames and marks error", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator({ failIndex: 2 });
@@ -379,7 +375,6 @@ test("runTurnaround on a mid-sequence failure keeps earlier frames and marks err
         runTurnaround(character, {
           store,
           generator,
-          charactersDir,
           fetchImpl: fakeFetch(),
           angles: [0, 45, 90, 135],
         }),
@@ -406,7 +401,7 @@ test("runTurnaround on a mid-sequence failure keeps earlier frames and marks err
 });
 
 test("runTurnaround persists the request_id when a frame download fails (row survives, path null)", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
@@ -417,7 +412,6 @@ test("runTurnaround persists the request_id when a frame download fails (row sur
         runTurnaround(character, {
           store,
           generator,
-          charactersDir,
           fetchImpl,
           angles: [0, 45, 90],
         }),
@@ -444,13 +438,13 @@ test("runTurnaround persists the request_id when a frame download fails (row sur
 });
 
 test("runTurnaround refuses an invalid identifier before any generation", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
     const hostile = { ...character, identifier: "../escape" };
     const { generator, calls } = fakeGenerator();
     await assert.rejects(
-      () => runTurnaround(hostile, { store, generator, charactersDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(hostile, { store, generator, fetchImpl: fakeFetch() }),
       /invalid identifier/u,
     );
     assert.equal(calls.length, 0);

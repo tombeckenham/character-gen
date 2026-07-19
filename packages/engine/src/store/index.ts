@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { emptyStatus, isValidIdentifier, PIPELINE_STEPS, STEP_STATES } from "../types.ts";
 import type {
   AssetKind,
@@ -62,6 +62,20 @@ export interface CharacterPatch {
   falCharacterId?: string | null;
 }
 
+export interface StoreOptions {
+  /** Sink for non-fatal problems the store skips over (a corrupt neighbor
+   * folder during a scan, a non-portable absolute asset path). Defaults to
+   * stderr so a problem is never silently dropped. */
+  onWarn?: (message: string) => void;
+}
+
+/**
+ * A path as persisted inside character.json — relative to the character folder
+ * whenever possible. Branded so an API-facing absolute path can never be
+ * assigned into a stored slot without going through `toStoredPath`.
+ */
+type StoredPath = string & { readonly __storedPath: true };
+
 /** The asset shape persisted inside character.json: no characterId (implied by
  * the containing file) and `localPath` kept relative to the character folder so
  * a committed folder stays valid on any machine. */
@@ -70,7 +84,7 @@ interface StoredAsset {
   kind: AssetKind;
   falRequestId: string | null;
   url: string | null;
-  localPath: string | null;
+  localPath: StoredPath | null;
   meta: Record<string, unknown> | null;
   createdAt: number;
 }
@@ -117,6 +131,10 @@ function normalizeStatus(parsed: unknown): CharacterStatus {
   return status;
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export interface CharacterStore {
   insertCharacter(input: NewCharacter): Promise<CharacterRecord>;
   getCharacter(idOrIdentifier: string): Promise<CharacterRecord | null>;
@@ -134,6 +152,13 @@ export interface CharacterStore {
    * asset record is gone. */
   setAssetLocalPath(id: string, localPath: string): Promise<AssetRecord>;
   getAssets(characterId: string): Promise<AssetRecord[]>;
+  /**
+   * The folder a character's media belongs in — the single source of truth for
+   * where files should be written so they stay portable in character.json.
+   * Validates the identifier (it lands in a file path) but does not require or
+   * create the folder.
+   */
+  characterDir(identifier: string): string;
   close(): void;
 }
 
@@ -149,19 +174,52 @@ export interface CharacterStore {
  * stable engine API), which makes each read-modify-write atomic within a
  * process; concurrent *processes* mutating the same character are
  * last-writer-wins — acceptable for a local single-user tool.
+ *
+ * character.json is designed to be hand-edited and git-merged, so corruption
+ * is an expected input, not an exotic one. A corrupt file read directly (by
+ * identifier) throws an error naming the file; during scans (list, uuid
+ * lookups) a corrupt folder is skipped with a warning through `onWarn` so one
+ * bad neighbor can never take down operations on healthy characters.
  */
 // The store is a single cohesive unit: one factory wiring the folder layout to
 // its query methods. Splitting it would scatter closely-related IO for no gain.
 // oxlint-disable-next-line max-lines-per-function
-export function openStore(charactersDir: string): CharacterStore {
+export function openStore(charactersDir: string, options: StoreOptions = {}): CharacterStore {
+  const warn =
+    options.onWarn ?? ((message: string): void => void process.stderr.write(`${message}\n`));
   const characterDir = (identifier: string): string => join(charactersDir, identifier);
   const characterFile = (identifier: string): string =>
     join(characterDir(identifier), CHARACTER_FILE);
 
   function readStored(identifier: string): StoredCharacter | null {
     const file = characterFile(identifier);
-    if (!existsSync(file)) return null;
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as StoredCharacter;
+    let raw: string;
+    try {
+      raw = readFileSync(file, "utf8");
+    } catch (error) {
+      // Only a genuinely absent file means "not a character folder" (the
+      // deliberate skip case); EACCES etc. must surface, not read as empty.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw new Error(`cannot read ${file}: ${errorText(error)}`, { cause: error });
+    }
+    let parsed: StoredCharacter;
+    try {
+      parsed = JSON.parse(raw) as StoredCharacter;
+    } catch (error) {
+      // Hand-edited/merge-conflicted JSON is the expected corruption mode —
+      // the error must name the file or every surface becomes a dead end.
+      throw new Error(
+        `invalid JSON in ${file} — fix or delete this character folder (${errorText(error)})`,
+        { cause: error },
+      );
+    }
+    if (parsed.identifier !== identifier) {
+      // Writes key off the stored identifier; letting this pass would silently
+      // fork the character into old-name and new-name folders.
+      throw new Error(
+        `corrupt character folder: ${file} says identifier "${String(parsed.identifier)}" but the folder is named "${identifier}" — rename one to match`,
+      );
+    }
     const profile = parsed.profile;
     if (
       !profile ||
@@ -188,25 +246,37 @@ export function openStore(charactersDir: string): CharacterStore {
       writeFileSync(tmp, `${JSON.stringify(stored, null, 2)}\n`);
       renameSync(tmp, file);
     } catch (error) {
-      rmSync(tmp, { force: true });
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        // Best-effort cleanup of our own tmp file; the original write error is
+        // the one that explains the root cause and must not be replaced.
+      }
       throw error;
     }
   }
 
-  /** Every stored character, in no particular order. Folders without a
-   * character.json (or a missing charactersDir) read as empty, not errors. */
+  /** Every readable stored character, in no particular order. Folders without
+   * a character.json (or a missing charactersDir) read as empty; a corrupt
+   * folder is skipped with a warning so one bad neighbor never breaks
+   * operations on healthy characters. */
   function scan(): StoredCharacter[] {
     if (!existsSync(charactersDir)) return [];
     const stored: StoredCharacter[] = [];
     for (const entry of readdirSync(charactersDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const record = readStored(entry.name);
-      if (record) stored.push(record);
+      try {
+        const record = readStored(entry.name);
+        if (record) stored.push(record);
+      } catch (error) {
+        warn(`store: skipping ${entry.name} — ${errorText(error)}`);
+      }
     }
     return stored;
   }
 
-  /** Finds by identifier (direct folder read) or by uuid (scan). */
+  /** Finds by identifier (direct folder read — corrupt target throws with the
+   * file named) or by uuid (tolerant scan). */
   function find(idOrIdentifier: string): StoredCharacter | null {
     if (isValidIdentifier(idOrIdentifier)) {
       const direct = readStored(idOrIdentifier);
@@ -232,10 +302,16 @@ export function openStore(charactersDir: string): CharacterStore {
   }
 
   /** Stores `localPath` relative to the character folder when it lives inside
-   * it (the normal case), so committed folders stay portable. */
-  function toStoredPath(stored: StoredCharacter, localPath: string): string {
+   * it (the normal case), so committed folders stay portable. A path outside
+   * the folder is kept as-is but warned about — it breaks portability. */
+  function toStoredPath(stored: StoredCharacter, localPath: string): StoredPath {
     const rel = relative(characterDir(stored.identifier), localPath);
-    return rel.startsWith("..") || isAbsolute(rel) ? localPath : rel;
+    const outside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+    if (!outside) return rel as StoredPath;
+    warn(
+      `store: asset path ${localPath} is outside characters/${stored.identifier}/ — stored as-is; this character folder will not be portable`,
+    );
+    return localPath as StoredPath;
   }
 
   return {
@@ -243,6 +319,13 @@ export function openStore(charactersDir: string): CharacterStore {
       if (!isValidIdentifier(input.identifier)) {
         throw new Error(
           `invalid identifier "${input.identifier}" — must be a lowercase slug of letters, digits, and hyphens`,
+        );
+      }
+      if (input.profile.identifier !== input.identifier) {
+        // The identifier is stored twice (top level + inside the profile);
+        // letting them disagree here would poison every later read.
+        throw new Error(
+          `insertCharacter: profile.identifier "${input.profile.identifier}" does not match identifier "${input.identifier}"`,
         );
       }
       if (existsSync(characterFile(input.identifier))) {
@@ -336,6 +419,13 @@ export function openStore(charactersDir: string): CharacterStore {
       return stored.assets
         .map((asset) => toAssetRecord(stored, asset))
         .toSorted((a, b) => a.createdAt - b.createdAt);
+    },
+
+    characterDir(identifier) {
+      if (!isValidIdentifier(identifier)) {
+        throw new Error(`characterDir: invalid identifier "${identifier}"`);
+      }
+      return characterDir(identifier);
     },
 
     close() {

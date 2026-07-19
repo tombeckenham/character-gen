@@ -43,7 +43,11 @@ const fakeFetch: FetchImpl = (() =>
 
 function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-passes-"));
-  return { store: openStore(join(dir, "characters")), dir, charactersDir: join(dir, "characters") };
+  return {
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
+    dir,
+    charactersDir: join(dir, "characters"),
+  };
 }
 
 /** Seeds a rich character WITH a stored master (passes edit from its URL). */
@@ -95,7 +99,7 @@ test("selectDetailSubjects: hands first, then imperfections, then props, capped"
 
 // oxlint-disable-next-line max-lines-per-function
 test("runSheetPasses runs the rich tier: face triptych + named expressions + details", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedWithMaster(store);
     const { generator, edits } = fakeEditor();
@@ -104,7 +108,6 @@ test("runSheetPasses runs the rich tier: face triptych + named expressions + det
     const outcome = await runSheetPasses(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["face", "expressions", "details"],
       detailCap: 2,
@@ -155,7 +158,7 @@ test("runSheetPasses runs the rich tier: face triptych + named expressions + det
 });
 
 test("runSheetPasses runs passes independently (scale alone) in canonical order", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedWithMaster(store);
     const { generator, edits } = fakeEditor();
@@ -163,7 +166,6 @@ test("runSheetPasses runs passes independently (scale alone) in canonical order"
     const outcome = await runSheetPasses(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["scale", "face"],
     });
@@ -179,7 +181,7 @@ test("runSheetPasses runs passes independently (scale alone) in canonical order"
 });
 
 test("runSheetPasses money-guard: a failing shot aborts everything after it", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedWithMaster(store);
     // Fail the last face shot; expressions/details must never generate.
@@ -190,7 +192,6 @@ test("runSheetPasses money-guard: a failing shot aborts everything after it", as
         runSheetPasses(character, {
           store,
           generator,
-          charactersDir,
           fetchImpl: fakeFetch,
           passes: ["face", "expressions", "details"],
         }),
@@ -213,7 +214,7 @@ test("runSheetPasses money-guard: a failing shot aborts everything after it", as
 });
 
 test("runSheetPasses without a master refuses before spending anything", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await store.insertCharacter({
       identifier: "no-master",
@@ -226,7 +227,6 @@ test("runSheetPasses without a master refuses before spending anything", async (
         runSheetPasses(character, {
           store,
           generator,
-          charactersDir,
           fetchImpl: fakeFetch,
           passes: ["face"],
         }),
@@ -243,7 +243,7 @@ test("runSheetPasses without a master refuses before spending anything", async (
 });
 
 test("runSheetPasses survives a throwing onAsset sink", async () => {
-  const { store, dir, charactersDir } = setup();
+  const { store, dir } = setup();
   try {
     const character = await seedWithMaster(store);
     const { generator } = fakeEditor();
@@ -251,7 +251,6 @@ test("runSheetPasses survives a throwing onAsset sink", async () => {
     const outcome = await runSheetPasses(character, {
       store,
       generator,
-      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["scale"],
       onProgress: (message) => warnings.push(message),

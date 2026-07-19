@@ -102,7 +102,6 @@ export function runSheetAndReport(
     const outcome = await runSheet(character, {
       store,
       generator,
-      charactersDir: paths.charactersDir,
       onProgress: progressWithLiveStart(store, paths),
     });
     return [
@@ -124,7 +123,6 @@ export function runSheetPassesAndReport(
     const outcome = await runSheetPasses(character, {
       store,
       generator,
-      charactersDir: paths.charactersDir,
       onProgress: progressWithLiveStart(store, paths),
       passes,
       detailCap,
@@ -149,7 +147,6 @@ export function runTurnaroundAndReport(
     const outcome = await runTurnaround(character, {
       store,
       generator,
-      charactersDir: paths.charactersDir,
       onProgress: progressWithLiveStart(store, paths),
       // Per-frame refresh so an open gallery shows the spin filling in live
       // (refreshGallery never throws — failures only warn).
