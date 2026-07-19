@@ -11,6 +11,7 @@
     "lint": "oxlint .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
+    "test": "node --test \"packages/*/src/**/*.test.ts\"",
     "check": "bun run typecheck && bun run lint && bun run format:check"
   },
   "devDependencies": {
