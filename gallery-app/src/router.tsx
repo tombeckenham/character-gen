@@ -9,11 +9,11 @@ import { GalleryContext, useGalleryData } from "./data.ts";
 import { GridPage } from "./GridPage.tsx";
 import { DetailPage } from "./DetailPage.tsx";
 
-/** Root layout owns the single poll loop and provides the data to all routes. */
+/** Root layout owns the single poll loop and provides the state to all routes. */
 function RootLayout() {
-  const data = useGalleryData();
+  const state = useGalleryData();
   return (
-    <GalleryContext.Provider value={data}>
+    <GalleryContext.Provider value={state}>
       <Outlet />
     </GalleryContext.Provider>
   );

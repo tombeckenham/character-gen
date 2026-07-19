@@ -11,7 +11,13 @@ export type Spawner = (command: string, args: string[]) => void;
 
 const defaultSpawner: Spawner = (command, args) => {
   // Detached + unref so the CLI exits immediately while the browser launches.
-  spawn(command, args, { stdio: "ignore", detached: true }).unref();
+  const child = spawn(command, args, { stdio: "ignore", detached: true });
+  // A missing opener (ENOENT) surfaces asynchronously; without this handler it
+  // would crash the process as an uncaught exception.
+  child.on("error", () => {
+    err(`Couldn't launch a browser (\`${command}\` failed) — open the URL above manually.`);
+  });
+  child.unref();
 };
 
 /** The platform's URL opener invocation for `url`. */

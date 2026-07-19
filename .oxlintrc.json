@@ -10,6 +10,24 @@
   "rules": {
     "react/react-in-jsx-scope": "off"
   },
+  "overrides": [
+    {
+      "files": ["packages/engine/src/gallery-data.ts", "packages/engine/src/types.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["node:*"],
+                "message": "This module is bundled into the browser SPA and must stay node-free."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
   "env": {
     "builtin": true
   },

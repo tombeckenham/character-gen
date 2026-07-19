@@ -1,8 +1,17 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createHash } from "node:crypto";
+import { join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isValidIdentifier } from "./character.ts";
-import { DATA_GLOBAL } from "./gallery-data.ts";
+import { DATA_GLOBAL, OPTIONAL_PROFILE_FIELDS } from "./gallery-data.ts";
 import type { GalleryAssetEntry, GalleryCharacter, GalleryData } from "./gallery-data.ts";
 import type { AssetRecord, CharacterRecord } from "./types.ts";
 import type { Database } from "./db/index.ts";
@@ -26,8 +35,9 @@ export interface GalleryWriteDeps {
   galleryDir: string;
   /** Override the built SPA index.html location (tests). */
   spaHtmlPath?: string;
-  /** Sink for non-fatal skip warnings (missing media files etc.). */
-  onWarn?: (message: string) => void;
+  /** Sink for non-fatal warnings (skipped media, refresh failures). Required so
+   * no caller can silently drop them. */
+  onWarn: (message: string) => void;
 }
 
 export interface GalleryWriteResult {
@@ -38,19 +48,39 @@ export interface GalleryWriteResult {
   characterCount: number;
 }
 
-const OPTIONAL_PROFILE_FIELDS = [
-  "archetype",
-  "personality",
-  "backstory",
-  "visualCanon",
-  "voiceDescription",
-] as const;
+/**
+ * Copies one media file into the gallery under a content-addressed name
+ * (`<stem>.<hash8><ext>`). The hash makes the `src` change whenever the bytes
+ * change — a browser re-fetches a regenerated image instead of showing its
+ * cached copy — and means an existing target name never needs rewriting. First
+ * writes go through a tmp + rename so a killed process can't leave a torn file
+ * under a valid name.
+ */
+function copyContentAddressed(sourcePath: string, destDir: string): string {
+  const bytes = readFileSync(sourcePath);
+  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 8);
+  const { name, ext } = parse(sourcePath);
+  const fileName = `${name}.${hash}${ext}`;
+  const dest = join(destDir, fileName);
+  if (!existsSync(dest)) {
+    const tmp = `${dest}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmp, bytes);
+      renameSync(tmp, dest);
+    } catch (error) {
+      rmSync(tmp, { force: true });
+      throw error;
+    }
+  }
+  return fileName;
+}
 
 /**
  * Copies a character's downloadable assets into `<galleryDir>/media/<identifier>/`
  * and returns their gallery-relative entries. Assets without a local file (failed
- * downloads have a null `local_path`, per the sheet step) are skipped; a recorded
- * path whose file has since vanished is skipped with a warning.
+ * downloads have a null `local_path`, per the sheet step) are skipped; a vanished
+ * file or a failed copy is skipped with a warning — one bad asset must never
+ * abort the whole gallery write.
  */
 function copyAssets(
   character: CharacterRecord,
@@ -70,10 +100,17 @@ function copyAssets(
       charMediaDir = join(galleryDir, "media", character.identifier);
       mkdirSync(charMediaDir, { recursive: true });
     }
-    const fileName = basename(asset.localPath);
-    copyFileSync(asset.localPath, join(charMediaDir, fileName));
-    // Built by hand (not join) so the payload always uses URL-style slashes.
-    entries.push({ kind: asset.kind, path: `media/${character.identifier}/${fileName}` });
+    try {
+      const fileName = copyContentAddressed(asset.localPath, charMediaDir);
+      // Built by hand (not join) so the payload always uses URL-style slashes.
+      entries.push({ kind: asset.kind, path: `media/${character.identifier}/${fileName}` });
+    } catch (error) {
+      warn(
+        `gallery: skipping ${character.identifier}/${asset.kind} — copy failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
   return entries;
 }
@@ -92,16 +129,6 @@ function toGalleryCharacter(character: CharacterRecord, assets: GalleryAssetEntr
   return entry;
 }
 
-/** Reads and bumps the persisted version counter; strictly increases across
- * separate writer runs and CLI invocations. */
-async function nextVersion(db: Database): Promise<number> {
-  const raw = await db.getSetting(GALLERY_VERSION_KEY);
-  const previous = raw === null ? 0 : Number(raw);
-  const version = (Number.isFinite(previous) && previous > 0 ? previous : 0) + 1;
-  await db.setSetting(GALLERY_VERSION_KEY, String(version));
-  return version;
-}
-
 /**
  * Writes the complete gallery: the built SPA as `index.html`, every character's
  * local media copied under `media/<identifier>/`, and finally `data.js` — written
@@ -111,8 +138,7 @@ async function nextVersion(db: Database): Promise<number> {
  * GALLERY_NOT_BUILT.
  */
 export async function writeGallery(deps: GalleryWriteDeps): Promise<GalleryWriteResult> {
-  const warn = deps.onWarn ?? (() => {});
-  const { galleryDir } = deps;
+  const { galleryDir, onWarn: warn } = deps;
   mkdirSync(galleryDir, { recursive: true });
 
   const indexHtml = join(galleryDir, "index.html");
@@ -131,13 +157,19 @@ export async function writeGallery(deps: GalleryWriteDeps): Promise<GalleryWrite
       warn(`gallery: skipping character with invalid identifier "${character.identifier}"`);
       continue;
     }
-    // Sequential by design: the copies are local file I/O per character.
+    // Sequential by design: each iteration is one local DB read plus local
+    // file copies for that character.
     // oxlint-disable-next-line no-await-in-loop
     const assets = await deps.db.getAssets(character.id);
     characters.push(toGalleryCharacter(character, copyAssets(character, assets, galleryDir, warn)));
   }
 
-  const payload: GalleryData = { version: await nextVersion(deps.db), characters };
+  // Bumped atomically in the DB so concurrent writers always mint distinct,
+  // strictly increasing versions.
+  const payload: GalleryData = {
+    version: await deps.db.bumpCounter(GALLERY_VERSION_KEY),
+    characters,
+  };
   const dataFile = join(galleryDir, "data.js");
   // Same-directory temp file so the rename is atomic on the same filesystem.
   const tmpFile = join(galleryDir, `.data.js.${process.pid}.tmp`);
@@ -169,8 +201,15 @@ export async function refreshGalleryIfPresent(deps: GalleryWriteDeps): Promise<v
   try {
     await writeGallery(deps);
   } catch (error) {
-    deps.onWarn?.(
-      `warning: gallery refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    // A plain Error is an operational failure and its message suffices; any
+    // other throw (TypeError etc.) is a programmer bug — keep the stack so it
+    // stays diagnosable despite being swallowed here.
+    const detail =
+      error instanceof Error
+        ? error.constructor === Error
+          ? error.message
+          : (error.stack ?? error.message)
+        : String(error);
+    deps.onWarn(`warning: gallery refresh failed: ${detail}`);
   }
 }

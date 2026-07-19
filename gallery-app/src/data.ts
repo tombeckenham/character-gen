@@ -14,33 +14,53 @@ declare global {
   }
 }
 
+/** Consecutive failed poll ticks before the page admits it has gone stale
+ * (~10s at POLL_INTERVAL_MS). */
+const STALE_AFTER_FAILURES = 5;
+
+export interface GalleryState {
+  data: GalleryData | null;
+  /** True when polling has failed long enough that `data` may be outdated. */
+  stale: boolean;
+}
+
 /**
  * Live gallery data. fetch() is blocked on file://, so this polls by injecting
- * `<script src="data.js?t=<now>">` every 2s and re-renders only when the
- * payload's `version` changes (reduceGalleryPoll keeps object identity
- * otherwise, so React bails out of unchanged renders — no flicker, scroll and
- * drag state preserved). A load error (file mid-write or not yet written) just
- * retries on the next tick.
+ * `<script src="data.js?t=<now>">` every POLL_INTERVAL_MS and re-renders only
+ * when the payload's `version` changes (reduceGalleryPoll keeps object
+ * identity otherwise, so the state set is a no-op — no flicker, in-page state
+ * like scroll and focus preserved). The global is cleared before each
+ * injection, so after the tick settles a missing global means a failed tick —
+ * whether the file was absent (error event) or present but unparseable (a
+ * script parse error still fires load). A failed tick keeps the last good
+ * data and retries; enough consecutive failures flip `stale` until a tick
+ * succeeds again.
  */
-export function useGalleryData(): GalleryData | null {
-  const [data, setData] = useState<GalleryData | null>(null);
+export function useGalleryData(): GalleryState {
+  const [state, setState] = useState<GalleryState>({ data: null, stale: false });
   const currentRef = useRef<GalleryData | null>(null);
+  const failuresRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
 
     const tick = (): void => {
+      delete window[DATA_GLOBAL];
       const script = document.createElement("script");
       const finish = (): void => {
         // Always remove the stale tag so polling never grows the DOM.
         script.remove();
         if (cancelled) return;
         const outcome = reduceGalleryPoll(currentRef.current, window[DATA_GLOBAL]);
-        if (outcome.changed) {
-          currentRef.current = outcome.data;
-          setData(outcome.data);
-        }
+        failuresRef.current = outcome.valid ? 0 : failuresRef.current + 1;
+        const stale = failuresRef.current >= STALE_AFTER_FAILURES;
+        if (outcome.changed) currentRef.current = outcome.data;
+        setState((previous) =>
+          previous.data === outcome.data && previous.stale === stale
+            ? previous
+            : { data: outcome.data, stale },
+        );
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
       };
       script.addEventListener("load", finish, { once: true });
@@ -56,12 +76,12 @@ export function useGalleryData(): GalleryData | null {
     };
   }, []);
 
-  return data;
+  return state;
 }
 
-/** Route components read the live data from here (provided by the root route). */
-export const GalleryContext = createContext<GalleryData | null>(null);
+/** Route components read the live state from here (provided by the root route). */
+export const GalleryContext = createContext<GalleryState>({ data: null, stale: false });
 
-export function useGallery(): GalleryData | null {
+export function useGallery(): GalleryState {
   return useContext(GalleryContext);
 }

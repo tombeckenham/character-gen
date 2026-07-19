@@ -1,4 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router";
+import { angleFromKind } from "@character-gen/engine/gallery-data";
 import type { GalleryCharacter } from "@character-gen/engine/gallery-data";
 import { StatusChips } from "./components.tsx";
 import { useGallery } from "./data.ts";
@@ -52,7 +53,7 @@ function ProfileFields({ character }: { character: GalleryCharacter }) {
 // oxlint-disable-next-line max-lines-per-function
 export function DetailPage() {
   const { identifier } = useParams({ from: "/c/$identifier" });
-  const data = useGallery();
+  const { data } = useGallery();
   const character = data?.characters.find((entry) => entry.identifier === identifier);
 
   if (data === null) {
@@ -73,10 +74,10 @@ export function DetailPage() {
     );
   }
 
-  // Data contract mount points for later phases: PR4 replaces the turnaround
-  // placeholder with the drag-to-scrub spinner fed by `angle_*` assets; PR5
-  // fills the voice section from `voice_sample`/`speech` assets.
-  const angleFrames = character.assets.filter((asset) => asset.kind.startsWith("angle_"));
+  // Data-contract mount points: the turnaround section becomes the
+  // drag-to-scrub spinner fed by `angle_*` assets; the voice section plays
+  // `voice_sample`/`speech` clips.
+  const angleFrames = character.assets.filter((asset) => angleFromKind(asset.kind) !== null);
   const voiceAssets = character.assets.filter(
     (asset) => asset.kind === "voice_sample" || asset.kind === "speech",
   );

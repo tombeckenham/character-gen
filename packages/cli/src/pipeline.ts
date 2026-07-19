@@ -21,6 +21,7 @@ import type {
   CharacterRecord,
   Database,
   FalClient,
+  ImageGenerator,
   PipelineStep,
   StatePaths,
 } from "@character-gen/engine";
@@ -84,7 +85,8 @@ function parseSteps(raw: string | undefined): { steps: PipelineStep[] } | { erro
   return { steps };
 }
 
-/** Rewrites the gallery if the user has one open; failures only warn. */
+/** Rewrites the gallery if one has ever been written (i.e. `open` was run);
+ * failures only warn. */
 function refreshGallery(db: Database, paths: StatePaths): Promise<void> {
   return refreshGalleryIfPresent({ db, galleryDir: paths.galleryDir, onWarn: err });
 }
@@ -95,10 +97,9 @@ function refreshGallery(db: Database, paths: StatePaths): Promise<void> {
 async function runSheetAndReport(
   db: Database,
   character: CharacterRecord,
-  client: FalClient,
+  generator: ImageGenerator,
   paths: StatePaths,
 ): Promise<boolean> {
-  const generator = makeFalImageGenerator(client);
   let succeeded: boolean;
   try {
     const outcome = await runSheet(character, {
@@ -205,7 +206,8 @@ export async function cmdCreate(rest: string[]): Promise<number> {
         err(client.error);
         return 1;
       }
-      return (await runSheetAndReport(db, character, client.client, paths)) ? 0 : 1;
+      const generator = makeFalImageGenerator(client.client);
+      return (await runSheetAndReport(db, character, generator, paths)) ? 0 : 1;
     }
     return 0;
   } finally {
@@ -213,7 +215,13 @@ export async function cmdCreate(rest: string[]): Promise<number> {
   }
 }
 
-export async function cmdSheet(rest: string[]): Promise<number> {
+export interface SheetDeps {
+  env?: NodeJS.ProcessEnv;
+  /** Override the fal-backed image generator (tests run offline). */
+  generator?: ImageGenerator;
+}
+
+export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<number> {
   if (wantsHelp(rest)) {
     out(COMMAND_HELP["sheet"] ?? "");
     return 0;
@@ -224,7 +232,7 @@ export async function cmdSheet(rest: string[]): Promise<number> {
     err("Usage: character-gen sheet <id|identifier>");
     return 1;
   }
-  const paths = statePaths();
+  const paths = statePaths(deps.env ?? process.env);
   ensureStateDirs(paths, ["root", "mediaDir"]);
   const db = openDatabase(paths.dbFile);
   try {
@@ -233,12 +241,16 @@ export async function cmdSheet(rest: string[]): Promise<number> {
       err(`No character found matching "${target}".`);
       return 1;
     }
-    const client = resolveClient();
-    if ("error" in client) {
-      err(client.error);
-      return 1;
+    let generator = deps.generator;
+    if (!generator) {
+      const client = resolveClient();
+      if ("error" in client) {
+        err(client.error);
+        return 1;
+      }
+      generator = makeFalImageGenerator(client.client);
     }
-    return (await runSheetAndReport(db, character, client.client, paths)) ? 0 : 1;
+    return (await runSheetAndReport(db, character, generator, paths)) ? 0 : 1;
   } finally {
     db.close();
   }

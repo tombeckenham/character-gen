@@ -14,6 +14,7 @@ export * from "./gallery.ts";
 // a second `export *` would create for those shared bindings.
 export {
   DATA_GLOBAL,
+  OPTIONAL_PROFILE_FIELDS,
   parseGalleryData,
   POLL_INTERVAL_MS,
   reduceGalleryPoll,

@@ -62,6 +62,10 @@ body {
   font-style: italic;
 }
 
+.stale {
+  color: var(--error);
+}
+
 /* ---- card grid ---- */
 
 .grid {
