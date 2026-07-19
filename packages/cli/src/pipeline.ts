@@ -285,7 +285,6 @@ export interface SpeakDeps {
  * takes a second positional (the line) and is not a tracked pipeline step, so it
  * has its own shape rather than going through cmdStep. */
 // One linear command: arg parse, char + generator resolution, run + report.
-// oxlint-disable-next-line max-lines-per-function
 export async function cmdSpeak(rest: string[], deps: SpeakDeps = {}): Promise<number> {
   if (wantsHelp(rest)) {
     out(COMMAND_HELP["speak"] ?? "");

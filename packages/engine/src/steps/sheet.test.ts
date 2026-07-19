@@ -1,4 +1,3 @@
-// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -79,7 +78,6 @@ function seedCharacter(store: CharacterStore): Promise<CharacterRecord> {
   });
 }
 
-// oxlint-disable-next-line max-lines-per-function
 test("runSheet generates master + variants, writes files, and records assets", async () => {
   const { store, dir, charactersDir } = setup();
   try {

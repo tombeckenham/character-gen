@@ -703,7 +703,7 @@ test("read-only operations never create the characters directory", async () => {
   }
 });
 
-test("characterDir returns the media folder and rejects invalid identifiers", async () => {
+test("characterDir returns the media folder and rejects invalid identifiers", () => {
   const { charactersDir, dir } = tmpCharactersDir();
   const store = openStore(charactersDir);
   try {

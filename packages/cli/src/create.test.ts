@@ -59,7 +59,6 @@ test("a failed sheet short-circuits the turnaround: no angle generation is ever 
 
 // One end-to-end scenario: seeding, counting generators, and DB assertions
 // belong to the same run.
-// oxlint-disable-next-line max-lines-per-function
 test("create --tier rich runs the core sheet then the rich passes", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-create-cli-"));
   try {

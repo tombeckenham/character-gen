@@ -51,7 +51,6 @@ function latestBy(
  */
 // One declarative table of the five sections; splitting it would scatter the
 // display order and caption rules.
-// oxlint-disable-next-line max-lines-per-function
 function buildSections(character: GalleryCharacter): GallerySection[] {
   const { assets } = character;
   const faces = FACE_KINDS.flatMap((kind) =>
@@ -208,7 +207,6 @@ function ProfileFields({ character }: { character: GalleryCharacter }) {
 }
 
 // One linear page layout; the sections are already extracted into components.
-// oxlint-disable-next-line max-lines-per-function
 export function DetailPage() {
   const { identifier } = useParams({ from: "/c/$identifier" });
   const { data } = useGallery();

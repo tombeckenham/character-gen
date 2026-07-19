@@ -1,5 +1,5 @@
-// oxlint-disable max-lines, import/max-dependencies -- exhaustive offline test
-// file exercising the whole gallery stack; length and wiring are inherent
+// oxlint-disable import/max-dependencies -- exhaustive offline test file
+// exercising the whole gallery stack; the wiring is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

@@ -33,7 +33,7 @@ interface DragState {
  */
 // One interaction surface: wheel/drag/keyboard all mutate the same transform
 // on the same stage element — splitting would scatter that shared state.
-// oxlint-disable-next-line max-lines-per-function
+// oxlint-disable-next-line max-lines-per-function -- one cohesive gesture/render unit
 export function Lightbox({
   images,
   index,

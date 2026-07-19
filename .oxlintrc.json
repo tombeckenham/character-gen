@@ -8,7 +8,10 @@
     "pedantic": "warn"
   },
   "rules": {
-    "react/react-in-jsx-scope": "off"
+    "react/react-in-jsx-scope": "off",
+    "max-lines-per-function": ["warn", { "max": 150 }],
+    "max-lines": ["warn", { "max": 600 }],
+    "import/max-dependencies": ["warn", { "max": 20 }]
   },
   "overrides": [
     {

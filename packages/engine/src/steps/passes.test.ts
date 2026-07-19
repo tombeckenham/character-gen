@@ -97,7 +97,6 @@ test("selectDetailSubjects: hands first, then imperfections, then props, capped"
   );
 });
 
-// oxlint-disable-next-line max-lines-per-function
 test("runSheetPasses runs the rich tier: face triptych + named expressions + details", async () => {
   const { store, dir } = setup();
   try {

@@ -31,7 +31,7 @@ interface DragState {
  */
 // One interaction surface: the drag/wheel/keyboard handlers and the frame
 // stack belong to the same stage element; splitting would scatter drag state.
-// oxlint-disable-next-line max-lines-per-function
+// oxlint-disable-next-line max-lines-per-function -- one cohesive gesture/render unit
 export function TurnaroundSpinner({ frames, name }: { frames: SpinnerFrame[]; name: string }) {
   const [rawIndex, setRawIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
