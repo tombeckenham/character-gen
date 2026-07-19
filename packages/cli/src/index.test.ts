@@ -132,7 +132,7 @@ test("show prints a seeded character's profile and assets", async () => {
 });
 
 test("an unimplemented pipeline command exits 1 with a coming-soon note", () => {
-  const res = runCli(["voice", "someone"]);
+  const res = runCli(["publish", "someone"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /coming soon/u);
 });
@@ -216,7 +216,7 @@ test("create --profile-json with an invalid profile shape exits 1", () => {
 });
 
 test("create --steps with a recognized-but-unimplemented step exits 1", () => {
-  const res = runCli(["create", "someone", "--steps", "voice"]);
+  const res = runCli(["create", "someone", "--steps", "publish"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /recognized but not implemented/u);
 });

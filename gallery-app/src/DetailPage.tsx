@@ -160,6 +160,36 @@ function ImageSection({
   );
 }
 
+function VoiceClips({ character }: { character: GalleryCharacter }) {
+  const clips = character.assets.filter(
+    (asset) => asset.kind === "voice_sample" || asset.kind === "speech",
+  );
+  if (clips.length === 0) {
+    return <p className="text-muted-foreground italic">Not designed yet.</p>;
+  }
+  let spokenLines = 0;
+  const labelled = clips.map((clip) => {
+    if (clip.kind === "voice_sample") return { clip, label: "Signature voice" };
+    spokenLines += 1;
+    return { clip, label: `Spoken line ${spokenLines}` };
+  });
+  return (
+    <div className="flex max-w-md flex-col gap-3">
+      {labelled.map(({ clip, label }) => (
+        <figure
+          key={clip.path}
+          className="m-0 rounded-md bg-foreground/5 px-3 py-2.5 ring-1 ring-foreground/10"
+        >
+          <figcaption className="mb-1.5 text-xs tracking-[0.12em] text-muted-foreground uppercase">
+            {label}
+          </figcaption>
+          <audio controls preload="none" src={clip.path} className="block w-full" />
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 function ProfileFields({ character }: { character: GalleryCharacter }) {
   const fields = PROFILE_FIELDS.filter(([key]) => character[key]);
   if (fields.length === 0) return null;
@@ -219,9 +249,6 @@ export function DetailPage() {
   // drag-to-scrub spinner fed by `angle_*` assets; the voice section plays
   // `voice_sample`/`speech` clips.
   const angleFrames = selectSpinnerFrames(character.assets);
-  const voiceAssets = character.assets.filter(
-    (asset) => asset.kind === "voice_sample" || asset.kind === "speech",
-  );
 
   return (
     <main className="mx-auto max-w-5xl px-6 pt-10 pb-16">
@@ -264,11 +291,7 @@ export function DetailPage() {
 
       <section data-mount="voice">
         <SectionTitle>Voice</SectionTitle>
-        <p className="text-muted-foreground italic">
-          {voiceAssets.length > 0
-            ? `${voiceAssets.length} clip${voiceAssets.length === 1 ? "" : "s"} ready — player coming soon.`
-            : "Not designed yet."}
-        </p>
+        <VoiceClips character={character} />
       </section>
 
       {lightboxIndex !== null && (

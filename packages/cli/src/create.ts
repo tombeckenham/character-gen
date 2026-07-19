@@ -8,6 +8,7 @@ import {
   IMPLEMENTED_STEPS,
   makeFalAngleGenerator,
   makeFalImageGenerator,
+  makeFalVoiceGenerator,
   openDatabase,
   PIPELINE_STEPS,
   statePaths,
@@ -20,6 +21,7 @@ import type {
   Database,
   ImageGenerator,
   PipelineStep,
+  VoiceGenerator,
 } from "@character-gen/engine";
 import { TIER_DETAIL_CAP, TIER_PASSES } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
@@ -30,6 +32,7 @@ import {
   runSheetAndReport,
   runSheetPassesAndReport,
   runTurnaroundAndReport,
+  runVoiceAndReport,
 } from "./pipeline.ts";
 import { parseTier } from "./sheet-cmd.ts";
 
@@ -108,21 +111,31 @@ export interface CreateDeps {
   /** Override the fal-backed generators (tests run offline). */
   imageGenerator?: ImageGenerator;
   angleGenerator?: AngleGenerator;
+  voiceGenerator?: VoiceGenerator;
 }
 
-/** Both step generators, from the overrides or a single resolved fal client
+interface CreateGenerators {
+  imageGenerator: ImageGenerator;
+  angleGenerator: AngleGenerator;
+  voiceGenerator: VoiceGenerator;
+}
+
+/** Every step generator, from the overrides or a single resolved fal client
  * (only resolved when an override is missing), or a key error to print. */
-function resolveGenerators(
-  deps: CreateDeps,
-): { imageGenerator: ImageGenerator; angleGenerator: AngleGenerator } | { error: string } {
-  if (deps.imageGenerator && deps.angleGenerator) {
-    return { imageGenerator: deps.imageGenerator, angleGenerator: deps.angleGenerator };
+function resolveGenerators(deps: CreateDeps): CreateGenerators | { error: string } {
+  if (deps.imageGenerator && deps.angleGenerator && deps.voiceGenerator) {
+    return {
+      imageGenerator: deps.imageGenerator,
+      angleGenerator: deps.angleGenerator,
+      voiceGenerator: deps.voiceGenerator,
+    };
   }
   const client = resolveClient();
   if ("error" in client) return client;
   return {
     imageGenerator: deps.imageGenerator ?? makeFalImageGenerator(client.client),
     angleGenerator: deps.angleGenerator ?? makeFalAngleGenerator(client.client),
+    voiceGenerator: deps.voiceGenerator ?? makeFalVoiceGenerator(client.client),
   };
 }
 
@@ -159,6 +172,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
   }
   const runSheetStep = parsedSteps.steps.includes("sheet");
   const runTurnaroundStep = parsedSteps.steps.includes("turnaround");
+  const runVoiceStep = parsedSteps.steps.includes("voice");
 
   const parsedTier = parseTier(values["tier"]);
   if ("error" in parsedTier) {
@@ -191,7 +205,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
     out(`Created ${character.name} (${character.identifier}).`);
     await refreshGallery(db, paths);
 
-    if (runSheetStep || runTurnaroundStep) {
+    if (runSheetStep || runTurnaroundStep || runVoiceStep) {
       const generators = resolveGenerators(deps);
       if ("error" in generators) {
         err(generators.error);
@@ -217,6 +231,12 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
       }
       if (runTurnaroundStep) {
         const ok = await runTurnaroundAndReport(db, character, generators.angleGenerator, paths);
+        if (!ok) return 1;
+      }
+      if (runVoiceStep) {
+        // Voice reads only the profile text, so it is independent of the image
+        // steps and runs off the same resolved generators.
+        const ok = await runVoiceAndReport(db, character, generators.voiceGenerator, paths);
         if (!ok) return 1;
       }
     }

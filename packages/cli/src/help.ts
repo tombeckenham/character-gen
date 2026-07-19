@@ -10,8 +10,8 @@ Commands:
   show <id|identifier>     Print a character's profile and assets
   sheet <char>             (Re)generate master sheet + expressions
   turnaround <char>        Generate the 12-angle spin frames
-  voice <char>             Design the character's signature voice            (coming soon)
-  speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
+  voice <char>             Design the character's signature voice
+  speak <char> "<line>"    Speak a line in the character's voice
   extract <script-file>    Emit cast JSON from a script                      (coming soon)
   publish <char>           Create/update the character on fal Assets         (coming soon)
   open                     Write the gallery and open it in a browser
@@ -24,8 +24,10 @@ Run 'character-gen <command> --help' for command-specific options.
 export const COMMAND_HELP: Record<string, string> = {
   create: `character-gen create "<description>" [--profile-json <file>] [--steps <list>] [--tier core|rich|full]
   Invent a profile (or take one via --profile-json) and run the pipeline.
-  Steps available now: profile, sheet, turnaround — all three run by default
-  (the 12-frame turnaround adds 12 generations; skip it with --steps profile,sheet).
+  Steps available now: profile, sheet, turnaround, voice — profile, sheet, and
+  turnaround run by default (the 12-frame turnaround adds 12 generations; skip it
+  with --steps profile,sheet). Voice design is opt-in: add it with
+  --steps profile,sheet,turnaround,voice.
   Creating the character (the profile step) always happens first, so --steps
   sheet still creates it, then generates the sheet. --surprise is designed for
   the cast skill; for now pass --profile-json directly.
@@ -52,9 +54,12 @@ export const COMMAND_HELP: Record<string, string> = {
   Requires a completed sheet (run character-gen sheet first). The gallery
   detail page renders the frames as a drag-to-scrub spinner.`,
   voice: `character-gen voice <char>
-  Design the character's signature voice from its voice description.`,
-  speak: `character-gen speak <char> "<line>"
-  Speak a line using the character's designed voice.`,
+  Design the character's signature voice from its voiceDescription (falling back
+  to its archetype/personality). Stores a reusable custom voice plus a preview
+  clip; run before speak.`,
+  speak: `character-gen speak <char> "<line>" [--emotion <emotion>]
+  Speak a line in the character's designed voice (run character-gen voice first).
+  --emotion is one of: happy, sad, angry, fearful, disgusted, surprised, neutral.`,
   extract: `character-gen extract <script-file>
   Parse a script to text and emit cast JSON for the skill to iterate on.`,
   publish: `character-gen publish <char>
