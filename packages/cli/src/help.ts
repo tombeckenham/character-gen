@@ -28,7 +28,7 @@ export const COMMAND_HELP: Record<string, string> = {
   (the 12-frame turnaround adds 12 generations; skip it with --steps profile,sheet).
   Creating the character (the profile step) always happens first, so --steps
   sheet still creates it, then generates the sheet. --surprise is designed for
-  the character-gen skill; for now pass --profile-json directly.
+  the cast skill; for now pass --profile-json directly.
   --tier adds rich-sheet passes after the core sheet (default core = none):
     core  master + expression grid + outfit               (3 generations)
     rich  core + face triptych + 4 expressions + 2 details (12 generations)

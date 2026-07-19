@@ -10,7 +10,7 @@ import { STUBS } from "./run.ts";
 
 const SKILLS_DIR = join(import.meta.dirname, "..", "..", "..", "skills");
 
-const EXPECTED_SKILLS = ["character-gen"];
+const EXPECTED_SKILLS = ["cast"];
 
 interface Skill {
   dir: string;

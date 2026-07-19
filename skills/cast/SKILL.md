@@ -1,9 +1,9 @@
 ---
-name: character-gen
-description: The character-gen CLI — an agent-first character generator built on fal.ai. Use it to create or invent characters (or "surprise me"), run the interview, generate rich character sheets and 12-angle turnarounds/spins, set up the fal API key, troubleshoot with doctor, and browse the live gallery.
+name: cast
+description: Cast characters with the character-gen CLI — an agent-first character generator built on fal.ai. Use it to create or invent characters (or "surprise me"), run the interview, generate rich character sheets and 12-angle turnarounds/spins, set up the fal API key, troubleshoot with doctor, and browse the live gallery.
 ---
 
-# character-gen
+# cast — the character-gen CLI
 
 character-gen generates rich characters entirely through fal APIs — character sheets, 12-angle turnarounds, voices — stores them locally, and renders a live static gallery. Every verb is a CLI command; you (Claude) are the brain that authors profiles and drives the pipeline. The gallery is a pure viewer: never try to trigger actions from it.
 
