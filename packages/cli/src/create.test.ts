@@ -101,10 +101,11 @@ test("create --tier rich runs the core sheet then the rich passes", async () => 
     );
 
     assert.equal(code, 0);
-    // Core: 1 generate + 2 edits. Rich passes: 3 face + 4 default expressions +
-    // 2 details (hands + the one imperfection) = 9 more edits — 12 generations.
+    // Core: 1 generate + 3 edits (portrait, expression, outfit). Rich passes:
+    // 3 face + 4 default expressions + 2 details (hands + the one imperfection)
+    // = 9 more edits — 13 generations.
     assert.equal(generates, 1);
-    assert.equal(edits, 11);
+    assert.equal(edits, 12);
     const store = openStore(join(dir, "characters"));
     try {
       const character = await store.getCharacter("aldous-grey");

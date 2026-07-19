@@ -64,6 +64,7 @@ function buildSections(character: GalleryCharacter): GallerySection[] {
     assets.filter(
       (asset) =>
         asset.kind === "master" ||
+        asset.kind === "portrait" ||
         asset.kind === "outfit" ||
         (asset.kind === "expression" && asset.label === undefined),
     ),
@@ -71,8 +72,8 @@ function buildSections(character: GalleryCharacter): GallerySection[] {
   )
     .toSorted(
       (a, b) =>
-        ["master", "expression", "outfit"].indexOf(a.kind) -
-        ["master", "expression", "outfit"].indexOf(b.kind),
+        ["portrait", "master", "expression", "outfit"].indexOf(a.kind) -
+        ["portrait", "master", "expression", "outfit"].indexOf(b.kind),
     )
     .map((asset) => ({
       asset,

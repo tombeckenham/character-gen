@@ -33,9 +33,9 @@ export const COMMAND_HELP: Record<string, string> = {
   sheet still creates it, then generates the sheet. --surprise is designed for
   the cast skill; for now pass --profile-json directly.
   --tier adds rich-sheet passes after the core sheet (default core = none):
-    core  master + expression grid + outfit               (3 generations)
-    rich  core + face triptych + 4 expressions + 2 details (12 generations)
-    full  rich + scale + up to 4 details                   (15 generations)`,
+    core  master + portrait + expression grid + outfit     (4 generations)
+    rich  core + face triptych + 4 expressions + 2 details (13 generations)
+    full  rich + scale + up to 4 details                   (16 generations)`,
   list: `character-gen list
   List all locally stored characters.`,
   show: `character-gen show <id|identifier>
@@ -43,9 +43,9 @@ export const COMMAND_HELP: Record<string, string> = {
   sheet: `character-gen sheet <char> [--tier core|rich|full] [--passes <list>]
   (Re)generate the master reference sheet and expression variants.
   --tier regenerates the core sheet plus that tier's extra passes:
-    core  master + expression grid + outfit               (3 generations)
-    rich  core + face triptych + 4 expressions + 2 details (12 generations)
-    full  rich + scale + up to 4 details                   (15 generations)
+    core  master + portrait + expression grid + outfit     (4 generations)
+    rich  core + face triptych + 4 expressions + 2 details (13 generations)
+    full  rich + scale + up to 4 details                   (16 generations)
   --passes face,expressions,details,scale reruns just those passes off the
   existing master (retry granularity — no core regeneration). The two flags
   are mutually exclusive. Passes stop at the first failure; nothing generates

@@ -1,7 +1,7 @@
 {
   "name": "character-gen",
   "description": "Agent-first character generator on fal.ai: interview-driven character creation, rich canon-locked character sheets, 12-angle drag-to-spin turnarounds, and a live offline gallery — all through the character-gen CLI.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Tom Beckenham",
     "url": "https://github.com/tombeckenham"

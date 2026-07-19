@@ -33,16 +33,17 @@ export function StatusChips({ character }: { character: GalleryCharacter }) {
   );
 }
 
-/** The card/detail hero: the face close-up when present, else the master. */
+/** The card/detail hero: the portrait close-up, else a front face, else the master. */
 export function heroAsset(character: GalleryCharacter): GalleryAssetEntry | undefined {
   return (
+    character.assets.find((asset) => asset.kind === "portrait") ??
     character.assets.find((asset) => asset.kind === "face_front") ??
     character.assets.find((asset) => asset.kind === "master")
   );
 }
 
 /** The card hero: the drag-to-scrub spinner when turnaround frames exist,
- * else face_front > master > a monogram placeholder. */
+ * else portrait > face_front > master > a monogram placeholder. */
 export function Portrait({ character }: { character: GalleryCharacter }) {
   const frames = selectSpinnerFrames(character.assets);
   if (frames.length > 0) {
@@ -54,7 +55,7 @@ export function Portrait({ character }: { character: GalleryCharacter }) {
       <img
         className="aspect-3/4 w-full object-cover object-top"
         src={hero.path}
-        alt={`${character.name} — ${hero.kind === "face_front" ? "face" : "master sheet"}`}
+        alt={`${character.name} — ${hero.kind === "master" ? "master sheet" : "portrait"}`}
       />
     );
   }
