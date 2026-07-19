@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   estimateFlickVelocity,
   FLICK_SAMPLE_WINDOW_MS,
@@ -49,6 +53,8 @@ export function TurnaroundSpinner({
 }) {
   const [rawIndex, setRawIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Card thumbnails auto-rotate while pointed at (see the hover effect below).
+  const [hovering, setHovering] = useState(false);
   // Frames whose media failed to load; they drop out of the scrub set rather
   // than showing the browser's broken-image icon at that angle.
   const [brokenPaths, setBrokenPaths] = useState<ReadonlySet<string>>(new Set());
@@ -100,6 +106,30 @@ export function TurnaroundSpinner({
       raf: requestAnimationFrame(step),
     };
   };
+
+  // Card thumbnails have no drag/click gesture (an anchor is natively
+  // draggable, so a press-drag on the wrapping Link grabbed the link/image
+  // instead of spinning). Instead they auto-rotate while the pointer is over
+  // them and snap back to the front view on leave.
+  useEffect(() => {
+    if (variant !== "card" || !hovering) return;
+    if (usable.length <= 1) return;
+    let raf = 0;
+    let last = performance.now();
+    let accumulated = 0;
+    const msPerFrame = 90;
+    const step = (now: number): void => {
+      accumulated += now - last;
+      last = now;
+      while (accumulated >= msPerFrame) {
+        accumulated -= msPerFrame;
+        setRawIndex((previous) => previous + 1);
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [variant, hovering, usable.length]);
 
   // React attaches wheel listeners passively; rotating the character must not
   // also scroll the page, so the non-passive listener is attached by hand.
@@ -160,51 +190,68 @@ export function TurnaroundSpinner({
         }
       : { "aria-hidden": true };
 
+  // The detail viewer is a drag/flick/scroll surface; the card thumbnail is a
+  // hover-to-spin decoration that leaves the wrapping Link's click intact.
+  const interactionProps =
+    variant === "detail"
+      ? {
+          onClick: (event: ReactMouseEvent<HTMLDivElement>) => {
+            if (!scrubbedRef.current) return;
+            event.preventDefault();
+            event.stopPropagation();
+          },
+          onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => {
+            // Grabbing the stage catches a coasting spin.
+            stopKinetic();
+            scrubbedRef.current = false;
+            dragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startIndex: index,
+              samples: [{ x: event.clientX, t: event.timeStamp }],
+            };
+            setDragging(true);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          },
+          onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            if (Math.abs(event.clientX - drag.startX) > 4) scrubbedRef.current = true;
+            drag.samples.push({ x: event.clientX, t: event.timeStamp });
+            // Only the flick window matters; keep the buffer tiny.
+            while (
+              drag.samples.length > 1 &&
+              event.timeStamp - (drag.samples[0]?.t ?? 0) > FLICK_SAMPLE_WINDOW_MS * 2
+            ) {
+              drag.samples.shift();
+            }
+            setRawIndex(
+              frameIndexFromDrag(drag.startIndex, event.clientX - drag.startX, usable.length),
+            );
+          },
+          onPointerUp: endDrag,
+          onPointerCancel: endDrag,
+        }
+      : {
+          onPointerEnter: () => setHovering(true),
+          onPointerLeave: () => {
+            setHovering(false);
+            setRawIndex(0);
+          },
+        };
+
   const stage = (
     <div
       ref={stageRef}
-      className={`relative aspect-3/4 w-full touch-none overflow-hidden bg-muted/20 select-none ${
+      className={`relative aspect-3/4 w-full overflow-hidden bg-muted/20 select-none ${
         variant === "detail"
-          ? "max-w-sm rounded-lg ring-1 ring-foreground/10 focus-visible:outline-2"
+          ? `max-w-sm touch-none rounded-lg ring-1 ring-foreground/10 focus-visible:outline-2 ${
+              dragging ? "cursor-grabbing" : "cursor-grab"
+            }`
           : ""
-      } ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+      }`}
       {...sliderProps}
-      onClick={(event) => {
-        if (!scrubbedRef.current) return;
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onPointerDown={(event) => {
-        // Grabbing the stage catches a coasting spin.
-        stopKinetic();
-        scrubbedRef.current = false;
-        dragRef.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startIndex: index,
-          samples: [{ x: event.clientX, t: event.timeStamp }],
-        };
-        setDragging(true);
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        const drag = dragRef.current;
-        if (!drag || drag.pointerId !== event.pointerId) return;
-        if (Math.abs(event.clientX - drag.startX) > 4) scrubbedRef.current = true;
-        drag.samples.push({ x: event.clientX, t: event.timeStamp });
-        // Only the flick window matters; keep the buffer tiny.
-        while (
-          drag.samples.length > 1 &&
-          event.timeStamp - (drag.samples[0]?.t ?? 0) > FLICK_SAMPLE_WINDOW_MS * 2
-        ) {
-          drag.samples.shift();
-        }
-        setRawIndex(
-          frameIndexFromDrag(drag.startIndex, event.clientX - drag.startX, usable.length),
-        );
-      }}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      {...interactionProps}
     >
       {usable.map((frame, frameIndex) => (
         <img

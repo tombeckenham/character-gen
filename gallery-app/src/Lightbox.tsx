@@ -21,14 +21,18 @@ export interface LightboxImage {
 
 interface DragState {
   pointerId: number;
+  startX: number;
+  startY: number;
   lastX: number;
   lastY: number;
+  /** True once this press moved far enough to count as a drag, not a click. */
+  moved: boolean;
 }
 
 /**
  * Fullscreen image lightbox: scroll/pinch-wheel to zoom about the cursor, drag
- * to pan, arrow keys / buttons to move between the character's images, Esc or
- * the close button to leave (the Dialog handles both). All transform math is
+ * to pan, arrow keys / buttons to move between the character's images, Esc or a
+ * click on the empty space around the image to leave. All transform math is
  * the engine's pure lightbox module; this component only wires events to it.
  */
 // One interaction surface: wheel/drag/keyboard all mutate the same transform
@@ -98,8 +102,12 @@ export function Lightbox({
     navigate(event.key === "ArrowRight" ? 1 : -1);
   };
 
+  // The press that ends this frame; read by onClick to tell a click (close)
+  // from the tail of a pan (keep open).
+  const lastDragMovedRef = useRef(false);
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (dragRef.current?.pointerId !== event.pointerId) return;
+    lastDragMovedRef.current = dragRef.current.moved;
     dragRef.current = null;
   };
 
@@ -108,6 +116,7 @@ export function Lightbox({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
+        showCloseButton={false}
         className="top-0 left-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none bg-transparent p-0 ring-0 sm:max-w-none"
         onKeyDown={onKeyDown}
       >
@@ -120,14 +129,22 @@ export function Lightbox({
           onPointerDown={(event) => {
             dragRef.current = {
               pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
               lastX: event.clientX,
               lastY: event.clientY,
+              moved: false,
             };
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
+            if (
+              Math.abs(event.clientX - drag.startX) > 4 ||
+              Math.abs(event.clientY - drag.startY) > 4
+            )
+              drag.moved = true;
             const rect = event.currentTarget.getBoundingClientRect();
             setTransform(
               reduceLightboxPan(
@@ -143,6 +160,11 @@ export function Lightbox({
           }}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
+          onClick={(event) => {
+            // Click the empty space around the image to dismiss — but not the
+            // image itself, and not the release of a pan gesture.
+            if (event.target === event.currentTarget && !lastDragMovedRef.current) onClose();
+          }}
         >
           <img
             src={active.path}
