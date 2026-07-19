@@ -12,8 +12,8 @@ Commands:
   turnaround <char>        Generate the 12-angle spin frames
   voice <char>             Design the character's signature voice
   speak <char> "<line>"    Speak a line in the character's voice
-  extract <script-file>    Emit cast JSON from a script                      (coming soon)
-  publish <char>           Create/update the character on fal Assets         (coming soon)
+  extract <script-file>    Print a script's text for cast extraction
+  publish <char>           Create/update the character on fal Assets (via genmedia)
   open                     Write the gallery and open it in a browser
   setup                    Store and validate your fal API key
   doctor                   Diagnose environment, key, and fal connectivity
@@ -61,9 +61,15 @@ export const COMMAND_HELP: Record<string, string> = {
   Speak a line in the character's designed voice (run character-gen voice first).
   --emotion is one of: happy, sad, angry, fearful, disgusted, surprised, neutral.`,
   extract: `character-gen extract <script-file>
-  Parse a script to text and emit cast JSON for the skill to iterate on.`,
+  Print the script's text to stdout. The cast skill reads it and does the
+  actual character extraction (Claude is the parser); this command just gives
+  the flow a stable file-reading contract.`,
   publish: `character-gen publish <char>
-  Create or update the character on the fal Assets Characters API.`,
+  Create or update the character on the fal Assets Characters API by shelling
+  out to the genmedia CLI (must be on PATH). Sends up to 20 prioritized image
+  request_ids as reference_images, the master image as the cover, and a
+  description distilled from the profile. Re-publishing a character that
+  already has a fal id updates it in place.`,
   open: `character-gen open [--no-browser]
   Write the gallery files and open the file:// URL in a browser.
   --no-browser writes the gallery and prints the URL without opening it.`,

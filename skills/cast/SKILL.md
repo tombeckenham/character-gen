@@ -28,11 +28,11 @@ node packages/cli/src/index.ts <command> [args]
 | `character-gen turnaround <char>`                                                                         | Generate the 12-angle spin frames from the master (requires a completed sheet).                                                                                                                                                                                                                                                                                                       |
 | `character-gen voice <char>`                                                                              | Design the character's signature voice from its `voiceDescription` (a reusable custom voice + a preview clip). Run once before `speak`.                                                                                                                                                                                                                                               |
 | `character-gen speak <char> "<line>" [--emotion <e>]`                                                     | Voice a line in the character's designed voice (run `voice` first). `--emotion` ∈ happy, sad, angry, fearful, disgusted, surprised, neutral. Each call adds a clip; earlier lines are kept.                                                                                                                                                                                           |
+| `character-gen publish <char>`                                                                            | Create/update the character on fal Assets Characters (shells out to the genmedia CLI, which must be on PATH). Sends up to 20 prioritized image request_ids as references + the master as cover; re-publishing updates the existing fal character in place.                                                                                                                            |
+| `character-gen extract <script-file>`                                                                     | Print a script file's text. YOU do the cast extraction (read the output, identify characters, author a profile each).                                                                                                                                                                                                                                                                 |
 | `character-gen open [--no-browser]`                                                                       | Write the gallery and open its `file://` URL. The page live-refreshes every 2s while other commands run.                                                                                                                                                                                                                                                                              |
 | `character-gen setup [--api-key <key>]`                                                                   | Validate and store a fal API key.                                                                                                                                                                                                                                                                                                                                                     |
 | `character-gen doctor`                                                                                    | Diagnose Node version, key source, fal connectivity, and character-store health.                                                                                                                                                                                                                                                                                                      |
-
-Coming soon (recognized but not implemented yet — do not run them): publish, extract.
 
 Every command supports `--help`. If a command exits non-zero, report the failure to the user; do not continue to the next step.
 
@@ -190,6 +190,22 @@ Turns the profile's `voiceDescription` into a real, reusable voice, then speaks 
 5. Report which clips landed and end with the character's deep link. "No designed voice for …" on `speak` → run `character-gen voice <identifier>` first.
 
 Voice can also run inside `character-gen create` via `--steps profile,sheet,voice` (it reads only the profile text, so it needs no images).
+
+## Workflow: publish a character to fal
+
+Run `character-gen publish <identifier>` once the character has at least a core sheet (the references are billed fal request_ids — more finished tiers publish richer reference sets, capped at 20 by identity value: faces > master > scale > expressions > details > cardinal angles > outfits > other angles).
+
+- Requires the **genmedia CLI** on PATH; if publish fails with "genmedia CLI is required", tell the user to install genmedia first.
+- Re-running publish after regenerating assets is safe and correct: an already-published character is updated in place (same fal character id).
+- Report the fal character id from the command output back to the user.
+
+## Workflow: extract a cast from a script
+
+1. `character-gen extract <script-file>` prints the script text (or read the file directly).
+2. YOU identify the distinct characters worth generating — named speaking roles first; confirm the list with the user if it is longer than ~4 (each full character is real generation cost).
+3. For each character, author a full profile (same bar as the create workflow — contradiction, imperfection, signature item, visual canon) grounded in what the script actually says; invent the rest coherently.
+4. Loop `character-gen create --profile-json <file>` per character (open the gallery first so the ensemble fills in live). Batch-friendly tiers: default core; only go rich/full if the user asks.
+5. End with the gallery link.
 
 ## Which command when
 

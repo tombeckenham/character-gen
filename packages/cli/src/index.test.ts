@@ -131,10 +131,10 @@ test("show prints a seeded character's profile and assets", async () => {
   }
 });
 
-test("an unimplemented pipeline command exits 1 with a coming-soon note", () => {
+test("publish for an unknown character exits 1", () => {
   const res = runCli(["publish", "someone"]);
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /coming soon/u);
+  assert.match(res.stderr, /No character found/u);
 });
 
 test("create with --steps profile derives a minimal profile and persists it", async () => {
@@ -425,4 +425,23 @@ test("a failing gallery refresh warns but never fails the pipeline", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("extract prints the script file's text", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const file = join(dir, "script.txt");
+    writeFileSync(file, "INT. LIGHTHOUSE — NIGHT\nISOLDE: The lamp stays lit.");
+    const res = runCliIn(dir, ["extract", file]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /ISOLDE: The lamp stays lit\./u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("extract with a missing file exits 1", () => {
+  const res = runCli(["extract", "/no/such/script.txt"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Could not read script file/u);
 });

@@ -8,16 +8,46 @@ import {
   statePaths,
   storeValidatedKey,
 } from "@character-gen/engine";
+import { readFileSync } from "node:fs";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import { cmdCreate } from "./create.ts";
 import { cmdSpeak, cmdTurnaround, cmdVoice } from "./pipeline.ts";
 import { cmdSheet } from "./sheet-cmd.ts";
 import { cmdOpen } from "./open.ts";
+import { cmdPublish } from "./publish-cmd.ts";
 
-/** Pipeline commands that are recognized but not built yet. Exported so the
- * skills drift test can assert no skill directs Claude at a stub. */
-export const STUBS: ReadonlySet<string> = new Set(["publish", "extract"]);
+/** Pipeline commands that are recognized but not built yet (none, currently).
+ * Exported so the skills drift test can assert no skill directs Claude at a
+ * stub — keep the machinery for future steps. */
+export const STUBS: ReadonlySet<string> = new Set();
+
+/**
+ * `extract <script-file>`: print the script's text. Claude does the actual
+ * cast extraction in the skill flow; this just gives it a stable contract for
+ * reading the file (and a clear error when the path is wrong).
+ */
+function cmdExtract(rest: string[]): number {
+  if (wantsHelp(rest)) {
+    out(COMMAND_HELP["extract"] ?? "");
+    return 0;
+  }
+  const { positionals } = parseArgs({ args: rest, allowPositionals: true, options: {} });
+  const file = positionals[0];
+  if (!file) {
+    err("Usage: character-gen extract <script-file>");
+    return 1;
+  }
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    err(`Could not read script file: ${file}`);
+    return 1;
+  }
+  out(text);
+  return 0;
+}
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */
@@ -191,6 +221,10 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdList(rest);
     case "show":
       return cmdShow(rest);
+    case "publish":
+      return cmdPublish(rest);
+    case "extract":
+      return cmdExtract(rest);
     case "open":
       return cmdOpen(rest);
     default: {
