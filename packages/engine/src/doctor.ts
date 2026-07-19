@@ -35,12 +35,12 @@ export interface DoctorReport {
 
 /**
  * When the key came from the genmedia config but fal rejects it with 401, the
- * likely cause is that genmedia stored the key encrypted at rest (its raw value
- * is unusable). Point the user at `setup` to store a working key.
+ * decoded key is genuinely invalid (revoked, or from a different account).
+ * Point the user at `setup` to store a working key that takes precedence.
  */
 function doctorHint(keySource: KeySource | null, ping: PingResult | null): string | null {
   if (keySource === "genmedia" && ping && !ping.ok && ping.status === 401) {
-    return "Key found in ~/.genmedia/config.json but fal rejected it (401) — genmedia may store it encrypted on this machine. Run `character-gen setup` to store a working key.";
+    return "Key decoded from ~/.genmedia/config.json but fal rejected it (401) — it may be revoked or from a different account. Run `character-gen setup` to store a working key.";
   }
   return null;
 }

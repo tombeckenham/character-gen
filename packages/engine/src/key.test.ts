@@ -48,6 +48,26 @@ test("genmedia config is used when no env key", () => {
   }
 });
 
+test("falls through an undecryptable (encrypted-envelope) genmedia key to state config", () => {
+  const dir = tmp();
+  try {
+    const genmedia = join(dir, "genmedia.json");
+    const state = join(dir, "state.json");
+    // Three base64 parts → looks like genmedia's encrypted envelope, but can't
+    // be decrypted here, so it must be skipped rather than handed to fal.
+    writeFileSync(genmedia, JSON.stringify({ apiKey: "aXY=:dGFn:Y2lwaGVy" }));
+    writeFileSync(state, JSON.stringify({ apiKey: "from-state" }));
+    const result = resolveFalKey({
+      env: noEnv,
+      genmediaConfigPath: genmedia,
+      stateConfigPath: state,
+    });
+    assert.deepEqual(result, { ok: true, key: "from-state", source: "config" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("falls through malformed genmedia config to state config", () => {
   const dir = tmp();
   try {
