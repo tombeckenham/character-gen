@@ -10,6 +10,7 @@ import {
   makeFalImageGenerator,
   openDatabase,
   PIPELINE_STEPS,
+  refreshGalleryIfPresent,
   resolveFalKey,
   runSheet,
   statePaths,
@@ -21,6 +22,7 @@ import type {
   Database,
   FalClient,
   PipelineStep,
+  StatePaths,
 } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
@@ -82,20 +84,27 @@ function parseSteps(raw: string | undefined): { steps: PipelineStep[] } | { erro
   return { steps };
 }
 
+/** Rewrites the gallery if the user has one open; failures only warn. */
+function refreshGallery(db: Database, paths: StatePaths): Promise<void> {
+  return refreshGalleryIfPresent({ db, galleryDir: paths.galleryDir, onWarn: err });
+}
+
 /** Runs the sheet step for a character, streaming progress to stderr and a
- * summary to stdout. Returns whether it succeeded. */
+ * summary to stdout. Returns whether it succeeded. Refreshes the gallery after
+ * the run either way, so an open page shows the done/error state live. */
 async function runSheetAndReport(
   db: Database,
   character: CharacterRecord,
   client: FalClient,
-  mediaDir: string,
+  paths: StatePaths,
 ): Promise<boolean> {
   const generator = makeFalImageGenerator(client);
+  let succeeded: boolean;
   try {
     const outcome = await runSheet(character, {
       db,
       generator,
-      mediaDir,
+      mediaDir: paths.mediaDir,
       onProgress: (message) => err(message),
     });
     out(
@@ -105,11 +114,13 @@ async function runSheetAndReport(
     for (const variant of outcome.variants) {
       out(`  ${variant.kind.padEnd(10)} ${variant.localPath ?? "(no path)"}`);
     }
-    return true;
+    succeeded = true;
   } catch (error) {
     err(`Sheet generation failed: ${describeError(error)}`);
-    return false;
+    succeeded = false;
   }
+  await refreshGallery(db, paths);
+  return succeeded;
 }
 
 /** Resolves the profile to create from --profile-json or a positional
@@ -186,6 +197,7 @@ export async function cmdCreate(rest: string[]): Promise<number> {
       return 1;
     }
     out(`Created ${character.name} (${character.identifier}).`);
+    await refreshGallery(db, paths);
 
     if (runSheetStep) {
       const client = resolveClient();
@@ -193,7 +205,7 @@ export async function cmdCreate(rest: string[]): Promise<number> {
         err(client.error);
         return 1;
       }
-      return (await runSheetAndReport(db, character, client.client, paths.mediaDir)) ? 0 : 1;
+      return (await runSheetAndReport(db, character, client.client, paths)) ? 0 : 1;
     }
     return 0;
   } finally {
@@ -226,7 +238,7 @@ export async function cmdSheet(rest: string[]): Promise<number> {
       err(client.error);
       return 1;
     }
-    return (await runSheetAndReport(db, character, client.client, paths.mediaDir)) ? 0 : 1;
+    return (await runSheetAndReport(db, character, client.client, paths)) ? 0 : 1;
   } finally {
     db.close();
   }

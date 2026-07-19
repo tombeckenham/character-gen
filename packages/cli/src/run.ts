@@ -11,9 +11,10 @@ import {
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import { cmdCreate, cmdSheet } from "./pipeline.ts";
+import { cmdOpen } from "./open.ts";
 
 /** Pipeline commands that are recognized but not built yet. */
-const STUBS = new Set(["open", "turnaround", "voice", "speak", "publish", "extract"]);
+const STUBS = new Set(["turnaround", "voice", "speak", "publish", "extract"]);
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */
@@ -180,6 +181,8 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdList(rest);
     case "show":
       return cmdShow(rest);
+    case "open":
+      return cmdOpen(rest);
     default: {
       if (STUBS.has(command)) {
         if (wantsHelp(rest)) {

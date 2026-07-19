@@ -1,0 +1,242 @@
+/* Dark gallery aesthetic. No external fonts — must work offline on file://. */
+:root {
+  --bg: #0c0d11;
+  --panel: #14161c;
+  --border: #23262f;
+  --text: #e8e6e1;
+  --muted: #8b8f9a;
+  --accent: #d8b46a;
+  --running: #6aa9d8;
+  --done: #7dc98f;
+  --error: #d87a6a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Helvetica,
+    Arial,
+    sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.masthead h1 {
+  font-size: 1.4rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin: 0;
+  color: var(--accent);
+}
+
+.masthead .sub {
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ---- card grid ---- */
+
+.grid {
+  margin-top: 2rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+}
+
+.portrait {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: #191b22;
+}
+
+.portrait-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.5rem;
+  color: var(--border);
+  font-weight: 700;
+}
+
+.card-body {
+  padding: 0.85rem 1rem 1rem;
+}
+
+.card-body h2 {
+  font-size: 1rem;
+  margin: 0;
+  font-weight: 600;
+}
+
+.archetype {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0.15rem 0 0;
+}
+
+/* ---- status chips ---- */
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+}
+
+.chip {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.chip-running {
+  color: var(--running);
+  border-color: var(--running);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.chip-done {
+  color: var(--done);
+  border-color: var(--done);
+}
+
+.chip-error {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ---- detail ---- */
+
+.back {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+.detail-head {
+  margin: 1.25rem 0 2rem;
+}
+
+.detail-head h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 650;
+}
+
+.section-title {
+  font-size: 0.8rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+  margin: 2.25rem 0 1rem;
+}
+
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.sheet-figure {
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sheet-figure img {
+  display: block;
+  width: 100%;
+}
+
+.sheet-figure figcaption {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.profile {
+  margin: 0;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.profile-row dt {
+  font-size: 0.72rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.profile-row dd {
+  margin: 0.15rem 0 0;
+}

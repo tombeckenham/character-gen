@@ -25,5 +25,5 @@
     "allowUnusedLabels": false,
     "erasableSyntaxOnly": true
   },
-  "include": ["packages/*/src", "gallery-app/src"]
+  "include": ["packages/*/src"]
 }

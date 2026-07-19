@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "@character-gen/engine";
@@ -308,4 +308,65 @@ test("sheet without an argument exits 1 with usage", () => {
   const res = runCli(["sheet"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /Usage: character-gen sheet/u);
+});
+
+/** Seeds a minimal already-opened gallery so refresh/open work without dist. */
+function seedGallery(dir: string): string {
+  const galleryDir = join(dir, "gallery");
+  mkdirSync(galleryDir, { recursive: true });
+  writeFileSync(join(galleryDir, "index.html"), "<!doctype html><title>seeded</title>");
+  return galleryDir;
+}
+
+test("open --no-browser writes the gallery and prints the file:// URL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    seedGallery(dir);
+    const res = runCliIn(dir, ["open", "--no-browser"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /Gallery written:/u);
+    assert.match(res.stdout, /file:\/\/.*\/gallery\/index\.html/u);
+    const dataJs = readFileSync(join(dir, "gallery", "data.js"), "utf8");
+    assert.match(dataJs, /^window\.CHARGEN_DATA = \{"version":1,"characters":\[\]\};/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create refreshes an already-opened gallery", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    seedGallery(dir);
+    const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
+    assert.equal(res.status, 0, res.stderr);
+    const dataJs = readFileSync(join(dir, "gallery", "data.js"), "utf8");
+    assert.match(dataJs, /a-lighthouse-keeper/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create does not conjure a gallery the user never opened", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(existsSync(join(dir, "gallery")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failing gallery refresh warns but never fails the pipeline", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    // A file where the gallery dir should be makes every write inside it fail.
+    writeFileSync(join(dir, "gallery"), "not a directory");
+    const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /Created A Lighthouse Keeper/u);
+    assert.match(res.stderr, /gallery refresh failed/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
