@@ -1,0 +1,11 @@
+{
+  "name": "@character-gen/cli",
+  "private": true,
+  "bin": {
+    "character-gen": "./src/index.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@character-gen/engine": "workspace:*"
+  }
+}

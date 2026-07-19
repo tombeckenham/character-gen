@@ -1,0 +1,5 @@
+{
+  "name": "@character-gen/gallery-app",
+  "private": true,
+  "type": "module"
+}

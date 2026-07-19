@@ -2,7 +2,7 @@
 
 An agent-first character generator for the fal.ai hackathon. You sit in Claude Code and prompt; Claude drives a local CLI that generates rich characters entirely through fal APIs — character sheets, drag-to-spin turnarounds, bespoke voices — stores them locally, renders a live static gallery, and publishes finished characters to the fal platform via the Assets Characters API.
 
-**Design thesis:** no server, no lifecycle, no UI-triggered actions. Every verb is a CLI command wrapped by a Claude Code skill. The "app" is a self-contained static HTML gallery that live-refreshes while Claude works. This mirrors (and one-ups) fal's own genmedia gallery, which is deliberately static/`file://` — ours is static *and* live.
+**Design thesis:** no server, no lifecycle, no UI-triggered actions. Every verb is a CLI command wrapped by a Claude Code skill. The "app" is a self-contained static HTML gallery that live-refreshes while Claude works. This mirrors (and one-ups) fal's own genmedia gallery, which is deliberately static/`file://` — ours is static _and_ live.
 
 ## Architecture
 
@@ -78,14 +78,14 @@ character-gen setup / doctor
 
 ## Skills (`~/.claude/skills`)
 
-| Skill | What it does |
-|---|---|
-| `character-gen` | Bootstrap/meta skill: runs installer if CLI missing, teaches Claude the CLI surface |
-| `create-character` | Invent profile (or surprise-roll), run full pipeline, open gallery |
-| `extract-characters` | Read a script/screenplay, extract the cast, batch-generate everyone |
-| `character-voice` | Design a voice / make a character speak a line |
-| `character-turnaround` | Generate/refresh the 8-angle spin |
-| `publish-character` | Push to fal Assets Characters, report the fal character id |
+| Skill                  | What it does                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `character-gen`        | Bootstrap/meta skill: runs installer if CLI missing, teaches Claude the CLI surface |
+| `create-character`     | Invent profile (or surprise-roll), run full pipeline, open gallery                  |
+| `extract-characters`   | Read a script/screenplay, extract the cast, batch-generate everyone                 |
+| `character-voice`      | Design a voice / make a character speak a line                                      |
+| `character-turnaround` | Generate/refresh the 8-angle spin                                                   |
+| `publish-character`    | Push to fal Assets Characters, report the fal character id                          |
 
 ## Data model (SQLite)
 
@@ -112,7 +112,7 @@ Every endpoint schema gets verified with `genmedia schema <endpoint>` before imp
 ## Demo script (3 min)
 
 1. `character-gen open` — empty gallery on screen
-2. Ask Claude: *"create a surprise character"* → profile appears, sheet fills in live, turnaround spins, voice says a line in-character
-3. Ask Claude: *"here's a script, generate the cast"* → gallery fills with the ensemble
-4. Ask Claude: *"publish the lighthouse keeper to fal"* → show the character on fal Assets
+2. Ask Claude: _"create a surprise character"_ → profile appears, sheet fills in live, turnaround spins, voice says a line in-character
+3. Ask Claude: _"here's a script, generate the cast"_ → gallery fills with the ensemble
+4. Ask Claude: _"publish the lighthouse keeper to fal"_ → show the character on fal Assets
 5. Close: "No server. One CLI. Five skills. 100% fal."
