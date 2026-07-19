@@ -10,89 +10,61 @@ import {
   withStepStatus,
 } from "./common.ts";
 import type { GeneratedAsset, GenProgress, StepMediaDeps } from "./common.ts";
-
-/** Designs the character's signature voice; the speech model voices any line. */
-export const VOICE_DESIGN_ENDPOINT = "fal-ai/minimax/voice-design";
-export const SPEECH_ENDPOINT = "fal-ai/minimax/speech-02-hd";
-
-/** The emotions the speech endpoint's `voice_setting.emotion` accepts. */
-export const SPEECH_EMOTIONS = [
-  "happy",
-  "sad",
-  "angry",
-  "fearful",
-  "disgusted",
-  "surprised",
-  "neutral",
-] as const;
-
-export type SpeechEmotion = (typeof SPEECH_EMOTIONS)[number];
-
-export interface VoiceDesignInput {
-  /** Voice-description prompt that shapes the personalized voice. */
-  prompt: string;
-  /** Short sample line the design endpoint speaks back (≤500 chars). */
-  previewText: string;
-}
-
-export interface SpeechInput {
-  text: string;
-  /** The designed `custom_voice_id` to synthesize with. */
-  voiceId: string;
-  emotion?: SpeechEmotion;
-}
+import { readVoicePreset, resolveVoiceModel, validatePreset } from "./voice-models.ts";
+import type { SpeechInput, VoiceDesignInput, VoiceModel } from "./voice-models.ts";
 
 /** A designed voice: the preview clip (as a stored asset) plus the reusable
- * `custom_voice_id` the speech endpoint synthesizes future lines with. */
+ * voice id the speech endpoint synthesizes future lines with. */
 export interface DesignedVoice extends GeneratedAsset {
   customVoiceId: string;
 }
 
-/** The voice step's only fal dependency, injectable so tests run offline.
- * `design` mints the signature voice; `speak` voices a line with it. */
+/**
+ * The voice step's only fal dependency, injectable so tests run offline. Both
+ * methods take the resolved `VoiceModel`, which supplies the endpoint and the
+ * input shape — the executor itself stays model-blind. `design` mints a bespoke
+ * voice (design-capable models only); `speak` voices a line with a voice id or
+ * preset.
+ */
 export interface VoiceGenerator {
   design(
+    model: VoiceModel,
     input: VoiceDesignInput,
     onProgress?: (update: GenProgress) => void,
   ): Promise<DesignedVoice>;
-  speak(input: SpeechInput, onProgress?: (update: GenProgress) => void): Promise<GeneratedAsset>;
-}
-
-/** Pulls the `custom_voice_id` out of a voice-design response, or throws. */
-function extractCustomVoiceId(data: unknown): string {
-  const id = (data as { custom_voice_id?: unknown }).custom_voice_id;
-  if (typeof id === "string" && id.length > 0) return id;
-  throw new Error("fal voice-design response contained no custom_voice_id");
+  speak(
+    model: VoiceModel,
+    input: SpeechInput,
+    onProgress?: (update: GenProgress) => void,
+  ): Promise<GeneratedAsset>;
 }
 
 /**
- * Real `VoiceGenerator` backed by the fal client's queue `subscribe`. Conforms
- * to the verified schemas: voice-design takes `prompt` + `preview_text` and
- * returns `custom_voice_id` + `audio`; speech-02-hd takes `text` +
- * `voice_setting` and returns `audio`.
+ * Real `VoiceGenerator` backed by the fal client's queue `subscribe`. Each call
+ * routes to the model's endpoint and shapes its input via the model's adapter,
+ * so a new model is added in voice-models.ts without touching this executor.
  */
 export function makeFalVoiceGenerator(client: FalClient): VoiceGenerator {
   return {
-    async design(input, onProgress) {
-      const result = await client.subscribe(VOICE_DESIGN_ENDPOINT, {
-        input: { prompt: input.prompt, preview_text: input.previewText },
+    async design(model, input, onProgress) {
+      if (!model.designEndpoint || !model.buildDesignInput || !model.extractVoiceId) {
+        throw new Error(
+          `Voice model "${model.key}" does not design bespoke voices — set a preset in the profile's "voice" block instead.`,
+        );
+      }
+      const result = await client.subscribe(model.designEndpoint, {
+        input: model.buildDesignInput(input),
         ...(onProgress ? { onQueueUpdate: onProgress } : {}),
       });
       return {
         requestId: result.requestId,
         url: extractAudioUrl(result.data),
-        customVoiceId: extractCustomVoiceId(result.data),
+        customVoiceId: model.extractVoiceId(result.data),
       };
     },
-    async speak(input, onProgress) {
-      const result = await client.subscribe(SPEECH_ENDPOINT, {
-        input: {
-          text: input.text,
-          voice_setting: {
-            voice_id: input.voiceId,
-            ...(input.emotion ? { emotion: input.emotion } : {}),
-          },
-        },
+    async speak(model, input, onProgress) {
+      const result = await client.subscribe(model.speechEndpoint, {
+        input: model.buildSpeechInput(input),
         ...(onProgress ? { onQueueUpdate: onProgress } : {}),
       });
       return { requestId: result.requestId, url: extractAudioUrl(result.data) };
@@ -106,7 +78,7 @@ function trimmedField(value: unknown): string {
 }
 
 /**
- * The prompt that shapes the designed voice: the authored `voiceDescription`
+ * The prompt that shapes a designed voice: the authored `voiceDescription`
  * verbatim when present, else one composed from archetype/personality. Null when
  * the profile carries none of those — the caller turns that into a clear error
  * rather than minting a random voice from nothing.
@@ -120,7 +92,7 @@ export function buildVoiceDesignPrompt(profile: CharacterProfile): string | null
   return traits.length > 0 ? `A distinctive character voice for ${traits.join(", ")}.` : null;
 }
 
-/** The sample line the design endpoint speaks back to preview the voice. */
+/** The sample line the voice step speaks back to preview the voice. */
 export function buildPreviewText(profile: CharacterProfile): string {
   return `Hello. I am ${profile.name}. This is the sound of my voice — remember it well.`;
 }
@@ -131,16 +103,28 @@ export interface RunVoiceDeps extends StepMediaDeps {
 
 export interface VoiceOutcome {
   sample: AssetRecord;
-  customVoiceId: string;
+  /** The voice model used (registry key). */
+  model: string;
+  /** The designed custom voice id (design path) or the preset name (preset path). */
+  voiceRef: string;
+  /** True when a bespoke voice was designed; false when a stock preset was used. */
+  designed: boolean;
 }
 
 /**
- * Designs the character's signature voice from its voice description,
- * downloading the preview clip to `characters/<identifier>/` and recording a
- * `voice_sample` asset whose meta carries the reusable `custom_voice_id` (which
- * `speak` reads). Marks the `voice` status running → done; on failure marks it
- * `error` and rethrows. Requires a profile with a voice description (or an
- * archetype/personality to compose one from).
+ * Establishes the character's voice, downloading a preview clip to
+ * `characters/<identifier>/` and recording a `voice_sample` asset. Two paths,
+ * both driven by the profile's `voice` block:
+ *
+ * - **Preset** (a `voice.preset` is set, or the chosen model can't design):
+ *   validates the preset and synthesizes the preview line with it, so an open
+ *   gallery still gets a sample. The sample's meta carries the preset + model.
+ * - **Design** (a design-capable model with no preset): mints a bespoke voice
+ *   from the voice description; the sample's meta carries the `customVoiceId`.
+ *
+ * Marks the `voice` status running → done; on failure marks it `error` and
+ * rethrows. Bad input (unknown model/preset, or a design path with no voice
+ * description) throws before the step is marked running.
  */
 export async function runVoice(
   character: CharacterRecord,
@@ -148,19 +132,46 @@ export async function runVoice(
 ): Promise<VoiceOutcome> {
   const report = dedupedReporter(deps.onProgress);
   const charDir = ensureCharacterMediaDir(character, deps.store, "voice");
+  const profile = character.profile;
 
-  const prompt = buildVoiceDesignPrompt(character.profile);
+  const model = resolveVoiceModel(profile);
+  const preset = readVoicePreset(profile);
+  const previewText = buildPreviewText(profile);
+
+  // Preset path: a chosen preset, or a model that can only speak from presets.
+  if (preset !== undefined || !model.designEndpoint) {
+    const chosen = preset === undefined ? model.defaultPreset : validatePreset(model, preset);
+    return await withStepStatus(deps.store, character.id, "voice", report, async () => {
+      report(`voice: previewing ${model.label} preset "${chosen}"…`);
+      const audio = await deps.generator.speak(
+        model,
+        { text: previewText, voiceRef: chosen },
+        (u) => report(`voice: ${u.status.toLowerCase()}`),
+      );
+      const sample = await storeAsset({
+        deps,
+        character,
+        charDir,
+        kind: "voice_sample",
+        fileName: "voice-sample.mp3",
+        image: audio,
+        meta: { endpoint: model.speechEndpoint, model: model.key, preset: chosen, previewText },
+      });
+      return { sample, model: model.key, voiceRef: chosen, designed: false };
+    });
+  }
+
+  // Design path: mint a bespoke voice from the description.
+  const prompt = buildVoiceDesignPrompt(profile);
   if (prompt === null) {
     throw new Error(
-      `No voice description for "${character.identifier}" — add a "voiceDescription" to its profile, then retry.`,
+      `No voice description for "${character.identifier}" — add a "voiceDescription" to its profile, or set a stock voice via "voice": { "model": "...", "preset": "..." }, then retry.`,
     );
   }
-  const previewText = buildPreviewText(character.profile);
-
   return await withStepStatus(deps.store, character.id, "voice", report, async () => {
-    report("voice: designing signature voice…");
-    const voice = await deps.generator.design({ prompt, previewText }, (update) =>
-      report(`voice: ${update.status.toLowerCase()}`),
+    report(`voice: designing signature ${model.label} voice…`);
+    const voice = await deps.generator.design(model, { prompt, previewText }, (u) =>
+      report(`voice: ${u.status.toLowerCase()}`),
     );
     const sample = await storeAsset({
       deps,
@@ -170,20 +181,22 @@ export async function runVoice(
       fileName: "voice-sample.mp3",
       image: voice,
       meta: {
-        endpoint: VOICE_DESIGN_ENDPOINT,
+        endpoint: model.designEndpoint,
+        model: model.key,
         customVoiceId: voice.customVoiceId,
         prompt,
         previewText,
       },
     });
-    return { sample, customVoiceId: voice.customVoiceId };
+    return { sample, model: model.key, voiceRef: voice.customVoiceId, designed: true };
   });
 }
 
 /**
  * The `custom_voice_id` of the character's designed voice: the newest
  * `voice_sample` asset carrying one in its meta (assets are ordered
- * oldest-first). Null when the voice step has not produced a usable one.
+ * oldest-first). Null when no bespoke voice has been designed (e.g. a
+ * preset-only character).
  */
 export async function findDesignedVoiceId(
   store: StepMediaDeps["store"],
@@ -204,7 +217,7 @@ export interface RunSpeakDeps extends StepMediaDeps {
   generator: VoiceGenerator;
   /** The line to voice. */
   line: string;
-  emotion?: SpeechEmotion;
+  emotion?: SpeechInput["emotion"];
 }
 
 export interface SpeakOutcome {
@@ -212,13 +225,41 @@ export interface SpeakOutcome {
 }
 
 /**
- * Voices a line in the character's designed voice, downloading the clip to
- * `characters/<identifier>/speech-<n>.mp3` and recording a `speech` asset. Each
- * clip gets a distinct sequence number (derived from the character's existing
- * speech assets, then bumped past any file already on disk) so successive
- * lines never overwrite one another. Requires a designed voice (run
- * `voice` first); this is not a tracked pipeline step, so it leaves statuses
- * untouched.
+ * The voice reference `speak` synthesizes with: the profile's preset wins; else
+ * a previously designed bespoke voice; else a preset-only model's default (with
+ * a note). A design-capable model with none of these is an error — the user must
+ * design a voice or name a preset first.
+ */
+async function resolveSpeakVoiceRef(
+  character: CharacterRecord,
+  model: VoiceModel,
+  preset: string | undefined,
+  store: StepMediaDeps["store"],
+  report: (message: string) => void,
+): Promise<string> {
+  if (preset !== undefined) return validatePreset(model, preset);
+  const designed = await findDesignedVoiceId(store, character.id);
+  if (designed !== null) return designed;
+  if (!model.designEndpoint) {
+    report(
+      `speak: no voice chosen — using ${model.label} default preset "${model.defaultPreset}".`,
+    );
+    return model.defaultPreset;
+  }
+  throw new Error(
+    `No designed voice for "${character.identifier}" — run \`character-gen voice ${character.identifier}\` first, or set "voice": { "preset": "…" } in its profile.`,
+  );
+}
+
+/**
+ * Voices a line in the character's voice, downloading the clip to
+ * `characters/<identifier>/speech-<n>.mp3` and recording a `speech` asset. The
+ * voice used is resolved from the profile: a `voice.preset` wins; otherwise a
+ * previously designed bespoke voice; otherwise a preset-only model falls back to
+ * its default preset. A design-capable model with neither is an error (run
+ * `voice` first, or set a preset). Each clip gets a distinct sequence number so
+ * successive lines never overwrite one another. Not a tracked pipeline step, so
+ * it leaves statuses untouched.
  */
 export async function runSpeak(
   character: CharacterRecord,
@@ -226,21 +267,26 @@ export async function runSpeak(
 ): Promise<SpeakOutcome> {
   const report = dedupedReporter(deps.onProgress);
   const charDir = ensureCharacterMediaDir(character, deps.store, "voice");
+  const profile = character.profile;
 
   const line = deps.line.trim();
   if (line.length === 0) {
     throw new Error("Nothing to speak — provide a non-empty line.");
   }
-  const voiceId = await findDesignedVoiceId(deps.store, character.id);
-  if (voiceId === null) {
-    throw new Error(
-      `No designed voice for "${character.identifier}" — run \`character-gen voice ${character.identifier}\` first.`,
-    );
-  }
+
+  const model = resolveVoiceModel(profile);
+  const voiceRef = await resolveSpeakVoiceRef(
+    character,
+    model,
+    readVoicePreset(profile),
+    deps.store,
+    report,
+  );
 
   report("speak: synthesizing…");
   const audio = await deps.generator.speak(
-    { text: line, voiceId, ...(deps.emotion ? { emotion: deps.emotion } : {}) },
+    model,
+    { text: line, voiceRef, ...(deps.emotion ? { emotion: deps.emotion } : {}) },
     (update) => report(`speak: ${update.status.toLowerCase()}`),
   );
   const assets = await deps.store.getAssets(character.id);
@@ -256,9 +302,10 @@ export async function runSpeak(
     fileName: `speech-${seq}.mp3`,
     image: audio,
     meta: {
-      endpoint: SPEECH_ENDPOINT,
+      endpoint: model.speechEndpoint,
+      model: model.key,
       text: line,
-      voiceId,
+      voiceRef,
       ...(deps.emotion ? { emotion: deps.emotion } : {}),
     },
   });

@@ -67,10 +67,31 @@ function imperfectionProblems(entry: unknown, index: number): string[] {
   return problems;
 }
 
+/** Shape problems for the optional `voice` block (model/preset selection). The
+ * values are validated against the registry at voice/speak time, not here — this
+ * only enforces the object shape so a malformed block is caught at authoring. */
+function voiceProblems(value: unknown): string[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return ['"voice" must be an object if present.'];
+  }
+  const problems: string[] = [];
+  const { model, preset } = value as Record<string, unknown>;
+  if (model !== undefined && typeof model !== "string") {
+    problems.push('"voice.model" must be a string if present.');
+  }
+  if (preset !== undefined && typeof preset !== "string") {
+    problems.push('"voice.preset" must be a string if present.');
+  }
+  return problems;
+}
+
 /** Shape problems for the optional rich-sheet fields (arrays, sub-objects,
  * imperfections). All fields are optional; only present ones are checked. */
 function collectRichFieldProblems(obj: Record<string, unknown>): string[] {
   const problems: string[] = [];
+
+  const voice = obj["voice"];
+  if (voice !== undefined) problems.push(...voiceProblems(voice));
 
   for (const field of STRING_ARRAY_FIELDS) {
     const value = obj[field];

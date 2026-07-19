@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import { cmdCreate } from "./create.ts";
-import { cmdSpeak, cmdTurnaround, cmdVoice } from "./pipeline.ts";
+import { cmdSpeak, cmdTurnaround, cmdVoice, cmdVoices } from "./pipeline.ts";
 import { cmdSheet } from "./sheet-cmd.ts";
 import { cmdOpen } from "./open.ts";
 import { cmdPublish } from "./publish-cmd.ts";
@@ -215,6 +215,8 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdTurnaround(rest);
     case "voice":
       return cmdVoice(rest);
+    case "voices":
+      return cmdVoices(rest);
     case "speak":
       return cmdSpeak(rest);
     case "list":

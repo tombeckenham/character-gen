@@ -185,6 +185,18 @@ export interface MotionTraits {
 }
 
 /**
+ * Which TTS model (and optionally which stock preset voice) the character's
+ * voice uses. `model` keys into the engine's voice-model registry (defaults to
+ * minimax); a `preset` selects a named stock voice and skips bespoke design, so
+ * `speak` uses the preset directly. Absent `preset` on a design-capable model
+ * means "design a bespoke voice from voiceDescription".
+ */
+export interface VoicePreference {
+  model?: string;
+  preset?: string;
+}
+
+/**
  * The character profile Claude authors in the skill flow. Only `name` and
  * `identifier` are load-bearing for the engine; the rest is free-form canon the
  * image/voice prompts consume, so it is intentionally permissive.
@@ -198,6 +210,8 @@ export interface CharacterProfile {
   /** Locked physical description reused verbatim in every image prompt. */
   visualCanon?: string;
   voiceDescription?: string;
+  /** TTS model + optional preset voice; see VoicePreference. */
+  voice?: VoicePreference;
   physical?: PhysicalTraits;
   imperfections?: Imperfection[];
   /** Props/garments the character always carries or wears. */
