@@ -31,10 +31,10 @@ command -v bun >/dev/null 2>&1 || fail "bun is required for install/build (https
 
 # --- clone or update --------------------------------------------------------
 if [ -d "$APP_DIR/.git" ]; then
-  say "Updating existing checkout at $APP_DIR…"
+  say "Updating existing checkout at ${APP_DIR}…"
   git -C "$APP_DIR" pull --ff-only
 else
-  say "Cloning character-gen into $APP_DIR…"
+  say "Cloning character-gen into ${APP_DIR}…"
   mkdir -p "$(dirname "$APP_DIR")"
   git clone --depth 1 "$REPO_URL" "$APP_DIR"
 fi
