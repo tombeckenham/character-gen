@@ -8,7 +8,7 @@ Commands:
   list                     List all characters
   show <id|identifier>     Print a character's profile and assets
   sheet <char>             (Re)generate master sheet + expressions
-  turnaround <char>        Generate the 8-angle spin frames                  (coming soon)
+  turnaround <char>        Generate the 8-angle spin frames
   voice <char>             Design the character's signature voice            (coming soon)
   speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
   extract <script-file>    Emit cast JSON from a script                      (coming soon)
@@ -23,10 +23,11 @@ Run 'character-gen <command> --help' for command-specific options.
 export const COMMAND_HELP: Record<string, string> = {
   create: `character-gen create "<description>" [--profile-json <file>] [--steps <list>]
   Invent a profile (or take one via --profile-json) and run the pipeline.
-  Steps available now: profile, sheet (default: both). Creating the character
-  (the profile step) always happens first, so --steps sheet still creates it,
-  then generates the sheet. --surprise is designed for the create-character
-  skill; for now pass --profile-json directly.`,
+  Steps available now: profile, sheet, turnaround (default: profile,sheet —
+  the 8-frame turnaround is opt-in via --steps profile,sheet,turnaround).
+  Creating the character (the profile step) always happens first, so --steps
+  sheet still creates it, then generates the sheet. --surprise is designed for
+  the create-character skill; for now pass --profile-json directly.`,
   list: `character-gen list
   List all locally stored characters.`,
   show: `character-gen show <id|identifier>
@@ -34,7 +35,9 @@ export const COMMAND_HELP: Record<string, string> = {
   sheet: `character-gen sheet <char>
   (Re)generate the master reference sheet and expression variants.`,
   turnaround: `character-gen turnaround <char>
-  Generate 8 turnaround views at 45° from the master image.`,
+  Generate 8 turnaround views at 45° increments from the master image.
+  Requires a completed sheet (run character-gen sheet first). The gallery
+  detail page renders the frames as a drag-to-scrub spinner.`,
   voice: `character-gen voice <char>
   Design the character's signature voice from its voice description.`,
   speak: `character-gen speak <char> "<line>"

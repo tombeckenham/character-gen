@@ -1,4 +1,5 @@
-// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
+// oxlint-disable max-lines, import/max-dependencies -- exhaustive offline test
+// file exercising the whole gallery stack; length and wiring are inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -248,9 +249,10 @@ test("interleaved bumps on separate db handles always mint distinct versions", a
       for (let round = 0; round < 3; round += 1) {
         // Deliberately interleaved and sequential — the ordering is the test.
         // oxlint-disable-next-line no-await-in-loop
-        versions.push(await ctx.db.bumpCounter("gallery_version"));
+        const mine = await ctx.db.bumpCounter("gallery_version");
         // oxlint-disable-next-line no-await-in-loop
-        versions.push(await other.bumpCounter("gallery_version"));
+        const theirs = await other.bumpCounter("gallery_version");
+        versions.push(mine, theirs);
       }
       assert.deepEqual(versions, [1, 2, 3, 4, 5, 6]);
     } finally {

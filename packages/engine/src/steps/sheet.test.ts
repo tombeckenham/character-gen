@@ -9,7 +9,7 @@ import type { Database } from "../db/index.ts";
 import type { CharacterRecord } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
 import { buildMasterPrompt, buildOutfitPrompt, makeFalImageGenerator, runSheet } from "./sheet.ts";
-import type { GeneratedImage, ImageEditInput, ImageGenerator, ImageGenInput } from "./sheet.ts";
+import type { GeneratedAsset, ImageEditInput, ImageGenerator, ImageGenInput } from "./sheet.ts";
 
 interface GenCall {
   op: "generate" | "edit";
@@ -25,13 +25,13 @@ function fakeGenerator(options: { failEditIndex?: number; failGenerate?: boolean
   const calls: GenCall[] = [];
   let editCount = 0;
   const generator: ImageGenerator = {
-    generate(input, onProgress): Promise<GeneratedImage> {
+    generate(input, onProgress): Promise<GeneratedAsset> {
       calls.push({ op: "generate", input });
       if (options.failGenerate) return Promise.reject(new Error("master boom"));
       onProgress?.({ status: "IN_PROGRESS" });
       return Promise.resolve({ requestId: "req-master", url: "https://fal.media/master.png" });
     },
-    edit(input, onProgress): Promise<GeneratedImage> {
+    edit(input, onProgress): Promise<GeneratedAsset> {
       const index = editCount;
       editCount += 1;
       calls.push({ op: "edit", input });
@@ -275,12 +275,12 @@ test("runSheet persists the running state before generation begins", async () =>
     const character = await seedCharacter(db);
     let stateDuringGenerate: string | undefined;
     const generator: ImageGenerator = {
-      async generate(): Promise<GeneratedImage> {
+      async generate(): Promise<GeneratedAsset> {
         const refreshed = await db.getCharacter(character.id);
         stateDuringGenerate = refreshed?.status.sheet;
         return { requestId: "req-master", url: "https://fal.media/master.png" };
       },
-      edit(): Promise<GeneratedImage> {
+      edit(): Promise<GeneratedAsset> {
         return Promise.resolve({ requestId: "req-edit", url: "https://fal.media/edit.png" });
       },
     };

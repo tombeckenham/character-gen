@@ -228,6 +228,60 @@ body {
   color: var(--muted);
 }
 
+/* ---- turnaround spinner ---- */
+
+.spinner-stage {
+  position: relative;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.spinner-stage.spinner-dragging {
+  cursor: grabbing;
+  border-color: var(--accent);
+}
+
+.spinner-stage:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.spinner-frame {
+  display: none;
+  width: 100%;
+}
+
+.spinner-frame-active {
+  display: block;
+}
+
+.spinner-angle {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  background: rgba(12, 13, 17, 0.75);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  pointer-events: none;
+}
+
+.spinner-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0.5rem 0 0;
+}
+
 .profile {
   margin: 0;
   display: grid;

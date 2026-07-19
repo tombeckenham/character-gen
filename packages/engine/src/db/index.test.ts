@@ -280,6 +280,29 @@ test("setStepState updates one step from fresh status and preserves siblings", a
   }
 });
 
+test("interleaved setStepState calls from two connections never lose a sibling write", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  const other = openDatabase(file);
+  try {
+    const created = await db.insertCharacter({ identifier: "isolde-keeper", name: "I", profile });
+    // Launched together so their internal awaits interleave — with a
+    // read-modify-write implementation one connection's stale snapshot would
+    // clobber the other's step; the single-statement json_set update cannot.
+    await Promise.all([
+      db.setStepState(created.id, "sheet", "done"),
+      other.setStepState(created.id, "turnaround", "running"),
+    ]);
+    const refreshed = await db.getCharacter(created.id);
+    assert.equal(refreshed?.status.sheet, "done");
+    assert.equal(refreshed?.status.turnaround, "running");
+  } finally {
+    db.close();
+    other.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("setStepState throws loudly for a vanished character (never a silent no-op)", async () => {
   const { file, dir } = tmpDbFile();
   const db = openDatabase(file);
