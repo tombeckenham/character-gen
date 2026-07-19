@@ -72,7 +72,7 @@ async function seedCharacter(db: Database, withMaster = true): Promise<Character
 }
 
 // oxlint-disable-next-line max-lines-per-function
-test("runTurnaround generates all 8 angles from the master and records assets in order", async () => {
+test("runTurnaround generates all 12 angles from the master and records assets in order", async () => {
   const { db, dir, mediaDir } = setup();
   try {
     const character = await seedCharacter(db);
@@ -93,18 +93,18 @@ test("runTurnaround generates all 8 angles from the master and records assets in
     );
     assert.ok(calls.every((c) => c.imageUrl === MASTER_URL));
 
-    assert.equal(outcome.frames.length, 8);
+    assert.equal(outcome.frames.length, 12);
     assert.deepEqual(
       outcome.frames.map((f) => f.kind),
       TURNAROUND_ANGLES.map((angle) => `angle_${angle}`),
     );
     assert.equal(outcome.frames[0]?.falRequestId, "req-angle-0");
-    assert.equal(outcome.frames[7]?.falRequestId, "req-angle-315");
+    assert.equal(outcome.frames[11]?.falRequestId, "req-angle-330");
 
     // Files landed under media/<identifier>/ and meta records the angle.
     assert.ok(existsSync(join(mediaDir, "isolde-keeper", "angle-0.png")));
-    assert.ok(existsSync(join(mediaDir, "isolde-keeper", "angle-315.png")));
-    assert.equal(outcome.frames[1]?.meta?.["horizontalAngle"], 45);
+    assert.ok(existsSync(join(mediaDir, "isolde-keeper", "angle-330.png")));
+    assert.equal(outcome.frames[1]?.meta?.["horizontalAngle"], 30);
     assert.equal(
       outcome.frames[1]?.meta?.["endpoint"],
       "fal-ai/qwen-image-edit-2511-multiple-angles",

@@ -78,7 +78,7 @@ test("a failed turnaround run flips the step to error in a live gallery's data.j
   }
 });
 
-test("a successful turnaround records the 8 frames through the CLI seam", async () => {
+test("a successful turnaround records the 12 frames through the CLI seam", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-turn-cli-"));
   try {
     await seedCharacter(dir, true);
@@ -103,7 +103,7 @@ test("a successful turnaround records the 8 frames through the CLI seam", async 
       assert.equal(character.status.turnaround, "done");
       const assets = await db.getAssets(character.id);
       const angles = assets.filter((a) => a.kind.startsWith("angle_"));
-      assert.equal(angles.length, 8);
+      assert.equal(angles.length, 12);
       assert.ok(angles.every((a) => a.localPath !== null));
     } finally {
       db.close();

@@ -2,19 +2,37 @@
 // No enums/namespaces — erasableSyntaxOnly rejects them; string unions + `as
 // const` arrays instead.
 
-export const TURNAROUND_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+/** The angles the turnaround step generates: a 12-frame ring at 30°. */
+export const TURNAROUND_ANGLES = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] as const;
 
-export type TurnaroundAngle = (typeof TURNAROUND_ANGLES)[number];
+/** Angles from the earlier 8-frame (45°) era: no longer generated, but stored
+ * assets keep these kinds, so they stay recognized for display. */
+export const LEGACY_TURNAROUND_ANGLES = [45, 135, 225, 315] as const;
 
-/** Asset kinds for the 8 turnaround frames, e.g. `angle_45`. */
+export type TurnaroundAngle =
+  | (typeof TURNAROUND_ANGLES)[number]
+  | (typeof LEGACY_TURNAROUND_ANGLES)[number];
+
+/** Asset kinds for turnaround frames, e.g. `angle_30` (or a legacy `angle_45`). */
 export type AngleKind = `angle_${TurnaroundAngle}`;
+
+/** Every angle whose `angle_*` kind is recognized, current era and legacy. */
+const KNOWN_ANGLES = [...TURNAROUND_ANGLES, ...LEGACY_TURNAROUND_ANGLES] as const;
+
+/** The three dedicated face views, in display (triptych) order. */
+export const FACE_KINDS = ["face_front", "face_three_quarter", "face_profile"] as const;
+
+export type FaceKind = (typeof FACE_KINDS)[number];
 
 /** The `assets.kind` string union — angle members derived from TURNAROUND_ANGLES. */
 export const ASSET_KINDS = [
   "master",
   "expression",
   "outfit",
-  ...TURNAROUND_ANGLES.map((angle) => `angle_${angle}` as const),
+  ...FACE_KINDS,
+  "detail",
+  "scale",
+  ...KNOWN_ANGLES.map((angle) => `angle_${angle}` as const),
   "voice_sample",
   "speech",
 ] as const;
@@ -26,15 +44,48 @@ export function angleKind(angle: TurnaroundAngle): AngleKind {
   return `angle_${angle}`;
 }
 
-/** The turnaround angle encoded in an `angle_*` kind, or null if it isn't one. */
+/** The turnaround angle encoded in an `angle_*` kind (current or legacy era),
+ * or null if it isn't one. */
 export function angleFromKind(kind: string): TurnaroundAngle | null {
   const match = /^angle_(\d+)$/u.exec(kind);
   if (!match) return null;
   const angle = Number(match[1]);
-  return (TURNAROUND_ANGLES as readonly number[]).includes(angle)
-    ? (angle as TurnaroundAngle)
-    : null;
+  return (KNOWN_ANGLES as readonly number[]).includes(angle) ? (angle as TurnaroundAngle) : null;
 }
+
+/**
+ * The rich-sheet generation passes, in canonical run order. Each pass is a
+ * separate invocation over the shared step core, but all of them roll up into
+ * the existing `sheet` pipeline step.
+ */
+export const SHEET_PASSES = ["face", "expressions", "details", "scale"] as const;
+
+export type SheetPass = (typeof SHEET_PASSES)[number];
+
+/** Sheet richness tiers — the CLI/skill vocabulary for how much to generate. */
+export const SHEET_TIERS = ["core", "rich", "full"] as const;
+
+export type SheetTier = (typeof SHEET_TIERS)[number];
+
+/** The extra passes each tier runs after the core sheet. */
+export const TIER_PASSES: Record<SheetTier, readonly SheetPass[]> = {
+  core: [],
+  rich: ["face", "expressions", "details"],
+  full: ["face", "expressions", "details", "scale"],
+};
+
+/** Detail-macro budget per tier (hands + imperfection/prop macros). */
+export const TIER_DETAIL_CAP: Record<SheetTier, number> = {
+  core: 0,
+  rich: 2,
+  full: 4,
+};
+
+/** Detail-macro cap when `--passes details` is invoked without a tier. */
+export const MAX_DETAIL_MACROS = 4;
+
+/** The expression set generated when a profile does not name its own. */
+export const DEFAULT_EXPRESSIONS = ["joy", "anger", "fear", "exhaustion"] as const;
 
 /** Pipeline steps whose progress we track per character. */
 export const PIPELINE_STEPS = ["profile", "sheet", "turnaround", "voice", "publish"] as const;
@@ -55,10 +106,15 @@ export const IMPLEMENTED_STEPS = [
 export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];
 
 /**
- * What `create` runs when `--steps` is omitted. The turnaround is implemented
- * but costs 8 generations, so it stays opt-in rather than a default.
+ * What `create` runs when `--steps` is omitted. The turnaround (12 generations)
+ * is part of the default experience — a character isn't done until you can
+ * spin them; skip it with an explicit `--steps profile,sheet`.
  */
-export const DEFAULT_CREATE_STEPS = ["profile", "sheet"] as const satisfies readonly PipelineStep[];
+export const DEFAULT_CREATE_STEPS = [
+  "profile",
+  "sheet",
+  "turnaround",
+] as const satisfies readonly PipelineStep[];
 
 export const STEP_STATES = ["pending", "running", "done", "error"] as const;
 
@@ -77,6 +133,37 @@ export function emptyStatus(): CharacterStatus {
   };
 }
 
+/** Structured physical traits — every field optional prose except height. */
+export interface PhysicalTraits {
+  apparentAge?: string;
+  build?: string;
+  heightCm?: number;
+  skin?: string;
+  eyes?: string;
+  hair?: string;
+  face?: string;
+}
+
+/**
+ * One identity-anchoring imperfection: what it is, where it sits, and the story
+ * behind it. Models keep a chipped tooth or a mended seam consistent far more
+ * reliably than generic prose, so each one is injected into every image prompt
+ * and gets its own macro shot in the `details` pass.
+ */
+export interface Imperfection {
+  what: string;
+  where: string;
+  story?: string;
+}
+
+/** How the character moves and rests — consumed by video prompts later. */
+export interface MotionTraits {
+  gait?: string;
+  posture?: string;
+  restingFace?: string;
+  habit?: string;
+}
+
 /**
  * The character profile Claude authors in the skill flow. Only `name` and
  * `identifier` are load-bearing for the engine; the rest is free-form canon the
@@ -91,6 +178,17 @@ export interface CharacterProfile {
   /** Locked physical description reused verbatim in every image prompt. */
   visualCanon?: string;
   voiceDescription?: string;
+  physical?: PhysicalTraits;
+  imperfections?: Imperfection[];
+  /** Props/garments the character always carries or wears. */
+  signatureItems?: string[];
+  palette?: string[];
+  materials?: string[];
+  motion?: MotionTraits;
+  /** The character's own emotional range; DEFAULT_EXPRESSIONS when absent. */
+  expressions?: string[];
+  /** Things the character would never look like/do — negative guidance. */
+  negativeCanon?: string[];
   [key: string]: unknown;
 }
 

@@ -21,14 +21,17 @@ import type {
   ImageGenerator,
   PipelineStep,
 } from "@character-gen/engine";
+import { TIER_DETAIL_CAP, TIER_PASSES } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import {
   refreshGallery,
   resolveClient,
   runSheetAndReport,
+  runSheetPassesAndReport,
   runTurnaroundAndReport,
 } from "./pipeline.ts";
+import { parseTier } from "./sheet-cmd.ts";
 
 // Which steps `create` implements vs. merely recognizes are both derived from the
 // engine's canonical lists, so a future phase enabling a step touches one place.
@@ -136,6 +139,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
     options: {
       "profile-json": { type: "string" },
       steps: { type: "string" },
+      tier: { type: "string" },
       surprise: { type: "boolean" },
     },
     allowPositionals: true,
@@ -143,7 +147,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
 
   if (values["surprise"]) {
     err(
-      "--surprise is designed for the create-character skill, which rolls a profile and passes it via --profile-json. For now, pass --profile-json directly.",
+      "--surprise is designed for the cast skill's surprise flow, which rolls a profile and passes it via --profile-json. For now, pass --profile-json directly.",
     );
     return 1;
   }
@@ -155,6 +159,17 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
   }
   const runSheetStep = parsedSteps.steps.includes("sheet");
   const runTurnaroundStep = parsedSteps.steps.includes("turnaround");
+
+  const parsedTier = parseTier(values["tier"]);
+  if ("error" in parsedTier) {
+    err(parsedTier.error);
+    return 1;
+  }
+  const tierPasses = TIER_PASSES[parsedTier.tier];
+  if (tierPasses.length > 0 && !runSheetStep) {
+    err(`--tier ${parsedTier.tier} needs the sheet step (its passes shoot from the master image).`);
+    return 1;
+  }
 
   const paths = statePaths(deps.env ?? process.env);
   ensureStateDirs(paths, ["root", "mediaDir"]);
@@ -186,6 +201,18 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
         const ok = await runSheetAndReport(db, character, generators.imageGenerator, paths);
         // A failed sheet leaves nothing for the turnaround to shoot from —
         // never bill 8 angle generations off a stale (or absent) master.
+        if (!ok) return 1;
+      }
+      if (tierPasses.length > 0) {
+        // Same money-guard: a failed pass stops the run before the turnaround.
+        const ok = await runSheetPassesAndReport(
+          db,
+          character,
+          generators.imageGenerator,
+          paths,
+          tierPasses,
+          TIER_DETAIL_CAP[parsedTier.tier],
+        );
         if (!ok) return 1;
       }
       if (runTurnaroundStep) {

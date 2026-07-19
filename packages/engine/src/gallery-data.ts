@@ -13,6 +13,7 @@ export {
   angleFromKind,
   angleKind,
   ASSET_KINDS,
+  FACE_KINDS,
   PIPELINE_STEPS,
   STEP_STATES,
   TURNAROUND_ANGLES,
@@ -21,19 +22,37 @@ export type {
   AngleKind,
   AssetKind,
   CharacterStatus,
+  FaceKind,
   PipelineStep,
   StepState,
   TurnaroundAngle,
 } from "./types.ts";
 export {
   DRAG_PIXELS_PER_FRAME,
+  estimateFlickVelocity,
+  FLICK_SAMPLE_WINDOW_MS,
   frameIndexFromDrag,
+  MIN_SPIN_VELOCITY,
+  reduceKineticSpin,
   reduceWheelSpin,
   selectSpinnerFrames,
+  SPIN_FRICTION_PER_SECOND,
   WHEEL_DELTA_PER_FRAME,
   wrapFrameIndex,
 } from "./spinner.ts";
-export type { SpinnerFrame, WheelSpin } from "./spinner.ts";
+export type { FlickSample, KineticSpin, SpinnerFrame, WheelSpin } from "./spinner.ts";
+export {
+  clampPan,
+  clampZoom,
+  LIGHTBOX_MAX_ZOOM,
+  LIGHTBOX_MIN_ZOOM,
+  LIGHTBOX_REST,
+  reduceLightboxPan,
+  reduceLightboxZoom,
+  WHEEL_ZOOM_PER_DELTA,
+  zoomFactorFromWheel,
+} from "./lightbox.ts";
+export type { LightboxTransform } from "./lightbox.ts";
 
 /** How often the gallery page re-injects `data.js` looking for a new version. */
 export const POLL_INTERVAL_MS = 2000;
@@ -46,7 +65,17 @@ export const DATA_GLOBAL = "CHARGEN_DATA";
 export interface GalleryAssetEntry {
   kind: AssetKind;
   path: string;
+  /** Named-expression label (`meta.label`), e.g. "cold fury". */
+  label?: string;
+  /** Detail-macro subject id (`meta.subject`): `hands` | `imperfection:<n>` | `prop:<n>`. */
+  subject?: string;
+  /** Detail-macro caption (`meta.caption`) — the imperfection's story. */
+  caption?: string;
 }
+
+/** The optional per-asset annotation fields the writer copies out of an
+ * asset's meta; writer and parser share this list so the contract cannot drift. */
+export const ASSET_ANNOTATION_FIELDS = ["label", "subject", "caption"] as const;
 
 export interface GalleryCharacter {
   identifier: string;
@@ -90,9 +119,15 @@ function parseAssets(raw: unknown): GalleryAssetEntry[] {
   const entries: GalleryAssetEntry[] = [];
   for (const item of raw) {
     if (item === null || typeof item !== "object") continue;
-    const { kind, path } = item as Record<string, unknown>;
+    const source = item as Record<string, unknown>;
+    const { kind, path } = source;
     if (!isAssetKind(kind) || typeof path !== "string" || path.length === 0) continue;
-    entries.push({ kind, path });
+    const entry: GalleryAssetEntry = { kind, path };
+    for (const field of ASSET_ANNOTATION_FIELDS) {
+      const value = source[field];
+      if (typeof value === "string" && value.length > 0) entry[field] = value;
+    }
+    entries.push(entry);
   }
   return entries;
 }

@@ -11,7 +11,8 @@ import {
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import { cmdCreate } from "./create.ts";
-import { cmdSheet, cmdTurnaround } from "./pipeline.ts";
+import { cmdTurnaround } from "./pipeline.ts";
+import { cmdSheet } from "./sheet-cmd.ts";
 import { cmdOpen } from "./open.ts";
 
 /** Pipeline commands that are recognized but not built yet. Exported so the

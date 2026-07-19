@@ -11,6 +11,19 @@ const OPTIONAL_STRING_FIELDS = [
   "voiceDescription",
 ] as const;
 
+/** Optional string-array fields on a profile; every element must be a string. */
+const STRING_ARRAY_FIELDS = [
+  "signatureItems",
+  "palette",
+  "materials",
+  "expressions",
+  "negativeCanon",
+] as const;
+
+/** Sub-object fields whose members are free-form strings (`physical` also
+ * allows the numeric `heightCm`). */
+const STRING_BAG_FIELDS = ["physical", "motion"] as const;
+
 /** A well-formed identifier: a lowercase slug of letters, digits, and hyphens. */
 const IDENTIFIER_RE = /^[a-z0-9-]+$/u;
 
@@ -46,6 +59,68 @@ export function slugify(input: string): string {
     .replaceAll(/^-+|-+$/gu, "")
     .slice(0, MAX_IDENTIFIER_LENGTH)
     .replaceAll(/-+$/gu, "");
+}
+
+/** Shape problems for one `imperfections` entry (see PLAN-RICH-SHEETS.md §1). */
+function imperfectionProblems(entry: unknown, index: number): string[] {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    return [`"imperfections[${index}]" must be an object.`];
+  }
+  const problems: string[] = [];
+  const { what, where, story } = entry as Record<string, unknown>;
+  if (typeof what !== "string" || what.trim().length === 0) {
+    problems.push(`"imperfections[${index}].what" is required and must be a string.`);
+  }
+  if (typeof where !== "string" || where.trim().length === 0) {
+    problems.push(`"imperfections[${index}].where" is required and must be a string.`);
+  }
+  if (story !== undefined && typeof story !== "string") {
+    problems.push(`"imperfections[${index}].story" must be a string if present.`);
+  }
+  return problems;
+}
+
+/** Shape problems for the optional rich-sheet fields (arrays, sub-objects,
+ * imperfections). All fields are optional; only present ones are checked. */
+function collectRichFieldProblems(obj: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+
+  for (const field of STRING_ARRAY_FIELDS) {
+    const value = obj[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+      problems.push(`"${field}" must be an array of strings if present.`);
+    }
+  }
+
+  for (const field of STRING_BAG_FIELDS) {
+    const value = obj[field];
+    if (value === undefined) continue;
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      problems.push(`"${field}" must be an object if present.`);
+      continue;
+    }
+    for (const [key, member] of Object.entries(value)) {
+      if (field === "physical" && key === "heightCm") {
+        if (typeof member !== "number") problems.push('"physical.heightCm" must be a number.');
+      } else if (typeof member !== "string") {
+        problems.push(`"${field}.${key}" must be a string.`);
+      }
+    }
+  }
+
+  const imperfections = obj["imperfections"];
+  if (imperfections !== undefined) {
+    if (Array.isArray(imperfections)) {
+      imperfections.forEach((entry: unknown, index) => {
+        problems.push(...imperfectionProblems(entry, index));
+      });
+    } else {
+      problems.push('"imperfections" must be an array if present.');
+    }
+  }
+
+  return problems;
 }
 
 /**
@@ -89,6 +164,8 @@ export function validateProfile(raw: unknown): CharacterProfile {
       problems.push(`"${field}" must be a string if present.`);
     }
   }
+
+  problems.push(...collectRichFieldProblems(obj));
 
   if (problems.length > 0) {
     throw new Error(`Invalid profile:\n- ${problems.join("\n- ")}`);

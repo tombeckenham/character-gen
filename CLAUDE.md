@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Agent-first character generator for the fal.ai hackathon. Claude Code skills drive a local `character-gen` CLI that generates characters entirely through fal APIs (character sheets, 8-angle turnarounds, bespoke voices), stores them locally, and publishes to the fal Assets Characters API. **PLAN.md is the full spec** — read it before implementing any pipeline step. Note: PLAN.md predates the switch to bun and still mentions pnpm; bun wins.
+Agent-first character generator for the fal.ai hackathon. Claude Code skills drive a local `character-gen` CLI that generates characters entirely through fal APIs (character sheets, 12-angle turnarounds, bespoke voices), stores them locally, and publishes to the fal Assets Characters API. **PLAN.md is the full spec** — read it before implementing any pipeline step. Note: PLAN.md predates the switch to bun and still mentions pnpm; bun wins.
 
 Design thesis: no server, no UI-triggered actions. Every verb is a CLI command wrapped by a Claude Code skill. The gallery is a pure viewer — a single self-contained static HTML file opened via `file://` that live-refreshes while the CLI works.
 
@@ -46,7 +46,7 @@ Character pipeline (each step records fal `request_id`s in SQLite; they double a
 
 1. **Profile** — Claude authors the JSON (name, identifier, archetype, visual canon, voice description) in the skill flow and passes `--profile-json`.
 2. **Sheet** — `openai/gpt-image-2` master image; `/edit` for expressions/outfits keeping identity.
-3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`, 8 views at 45°; gallery renders drag-to-scrub spinner.
+3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`, 12 views at 30°; gallery renders drag-to-scrub spinner.
 4. **Voice** — `fal-ai/minimax/voice-design` signature sample; `bytedance/seed-audio-1.0` speaks lines with it.
 5. **Publish** — `POST https://api.fal.ai/v1/assets/characters` (`Authorization: Key <FAL_KEY>`, request_ids as `reference_images`, `Idempotency-Key` derived from local UUID). Store the returned fal character id; publish becomes update when it exists.
 

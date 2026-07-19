@@ -138,8 +138,10 @@ export function openDatabase(dbFile: string): Database {
   const client = new DatabaseSync(dbFile);
   client.exec("PRAGMA journal_mode = WAL;");
   client.exec("PRAGMA foreign_keys = ON;");
-  // Schema generation marker for future gated ALTERs.
-  client.exec("PRAGMA user_version = 1;");
+  // Schema generation marker for future gated ALTERs. v2: the rich-sheet era
+  // (face_*/detail/scale asset kinds + structured profile fields — TEXT columns,
+  // so no ALTER was needed; the bump just marks the era).
+  client.exec("PRAGMA user_version = 2;");
   client.exec(SCHEMA_DDL);
   const db = drizzle({ client });
 

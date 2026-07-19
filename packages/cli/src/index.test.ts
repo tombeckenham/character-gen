@@ -246,10 +246,10 @@ test("create --steps with an unknown step exits 1", () => {
   assert.match(res.stderr, /Unknown step "frobnicate"/u);
 });
 
-test("create --surprise points to the create-character skill", () => {
+test("create --surprise points to the cast skill", () => {
   const res = runCli(["create", "someone", "--surprise"]);
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /create-character skill/u);
+  assert.match(res.stderr, /cast skill/u);
 });
 
 test("create (default steps) with a valid profile but no key creates then fails at sheet", async () => {
@@ -362,7 +362,7 @@ test("turnaround on an existing character with no key exits 1 with a setup hint"
 test("root help lists turnaround as available (not coming soon)", () => {
   const res = runCli(["--help"]);
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /turnaround <char>\s+Generate the 8-angle spin frames\n/u);
+  assert.match(res.stdout, /turnaround <char>\s+Generate the 12-angle spin frames\n/u);
 });
 
 /** Seeds a minimal already-opened gallery so refresh/open work without dist. */

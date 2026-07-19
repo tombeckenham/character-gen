@@ -1,3 +1,4 @@
+// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -81,6 +82,63 @@ test("validateProfile rejects a non-string optional field", () => {
   assert.throws(
     () => validateProfile({ name: "X", identifier: "x", archetype: 42 }),
     /"archetype" must be a string/u,
+  );
+});
+
+test("validateProfile accepts the full rich-sheet field set", () => {
+  const profile = validateProfile({
+    name: "Aldous Grey",
+    identifier: "aldous-grey",
+    physical: { apparentAge: "late 40s", heightCm: 178, eyes: "pale grey" },
+    imperfections: [
+      { what: "thin white scar", where: "left eyebrow to temple", story: "gaff hook" },
+      { what: "chipped front tooth", where: "upper left" },
+    ],
+    signatureItems: ["brass pocket compass"],
+    palette: ["storm grey", "oxblood"],
+    materials: ["worn oilskin"],
+    motion: { gait: "rolling", habit: "thumbs the compass lid" },
+    expressions: ["weathered joy", "cold fury"],
+    negativeCanon: ["never clean-shaven"],
+  });
+  assert.equal(profile.physical?.heightCm, 178);
+  assert.equal(profile.imperfections?.length, 2);
+});
+
+test("validateProfile rejects malformed rich-sheet fields with itemized problems", () => {
+  assert.throws(
+    () =>
+      validateProfile({
+        name: "X",
+        identifier: "x",
+        physical: { heightCm: "tall" },
+        motion: { gait: 3 },
+        signatureItems: "compass",
+        expressions: ["joy", 4],
+        imperfections: [{ where: "brow" }, "scar", { what: "scar", where: "brow", story: 9 }],
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /"physical\.heightCm" must be a number/u);
+      assert.match(err.message, /"motion\.gait" must be a string/u);
+      assert.match(err.message, /"signatureItems" must be an array of strings/u);
+      assert.match(err.message, /"expressions" must be an array of strings/u);
+      assert.match(err.message, /"imperfections\[0\]\.what" is required/u);
+      assert.match(err.message, /"imperfections\[1\]" must be an object/u);
+      assert.match(err.message, /"imperfections\[2\]\.story" must be a string/u);
+      return true;
+    },
+  );
+});
+
+test("validateProfile rejects non-object physical/motion and non-array imperfections", () => {
+  assert.throws(
+    () => validateProfile({ name: "X", identifier: "x", physical: ["wiry"] }),
+    /"physical" must be an object/u,
+  );
+  assert.throws(
+    () => validateProfile({ name: "X", identifier: "x", imperfections: { what: "scar" } }),
+    /"imperfections" must be an array/u,
   );
 });
 
