@@ -147,7 +147,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
 
   if (values["surprise"]) {
     err(
-      "--surprise is designed for the create-character skill, which rolls a profile and passes it via --profile-json. For now, pass --profile-json directly.",
+      "--surprise is designed for the character-gen skill's surprise flow, which rolls a profile and passes it via --profile-json. For now, pass --profile-json directly.",
     );
     return 1;
   }

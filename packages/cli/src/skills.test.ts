@@ -10,7 +10,7 @@ import { STUBS } from "./run.ts";
 
 const SKILLS_DIR = join(import.meta.dirname, "..", "..", "..", "skills");
 
-const EXPECTED_SKILLS = ["character-gen", "character-turnaround", "create-character"];
+const EXPECTED_SKILLS = ["character-gen"];
 
 interface Skill {
   dir: string;
@@ -121,6 +121,24 @@ test("every --tier value in a skill's code names a real tier", () => {
       }
     }
   }
+});
+
+test("the Claude Code plugin marketplace manifests parse and agree", () => {
+  const root = join(SKILLS_DIR, "..");
+  const marketplace = JSON.parse(
+    readFileSync(join(root, ".claude-plugin", "marketplace.json"), "utf8"),
+  ) as {
+    name: string;
+    plugins: Array<{ name: string; source: string }>;
+  };
+  const plugin = JSON.parse(readFileSync(join(root, ".claude-plugin", "plugin.json"), "utf8")) as {
+    name: string;
+  };
+  assert.equal(marketplace.name, "character-gen");
+  assert.equal(marketplace.plugins.length, 1);
+  assert.equal(marketplace.plugins[0]?.name, plugin.name);
+  // The plugin root is the repo itself, so skills/ ships with it.
+  assert.equal(marketplace.plugins[0]?.source, "./");
 });
 
 test("every --passes list in a skill's code names only real sheet passes", () => {

@@ -246,10 +246,10 @@ test("create --steps with an unknown step exits 1", () => {
   assert.match(res.stderr, /Unknown step "frobnicate"/u);
 });
 
-test("create --surprise points to the create-character skill", () => {
+test("create --surprise points to the character-gen skill", () => {
   const res = runCli(["create", "someone", "--surprise"]);
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /create-character skill/u);
+  assert.match(res.stderr, /character-gen skill/u);
 });
 
 test("create (default steps) with a valid profile but no key creates then fails at sheet", async () => {
