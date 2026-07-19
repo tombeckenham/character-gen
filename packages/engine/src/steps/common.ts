@@ -11,6 +11,82 @@ import type { Database } from "../db/index.ts";
  * PNG fetch legitimately takes longer. */
 export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
+/** Default number of image generations kept in flight within one step. Bounded
+ * so a step fans out to fal quickly without tripping rate limits. */
+export const DEFAULT_GEN_CONCURRENCY = 4;
+
+/** A worker rejection, tagged with the input index that produced it. */
+export interface PoolFailure {
+  index: number;
+  reason: unknown;
+}
+
+export interface PoolOutcome<R> {
+  /** Worker results in input order; a failed item's slot is `undefined`. */
+  results: (R | undefined)[];
+  /** Every rejection, in completion order (sort by `index` for stable output). */
+  failures: PoolFailure[];
+}
+
+/**
+ * Runs `worker` over `items` with at most `concurrency` in flight, collecting
+ * every result (in input order) and every rejection rather than failing fast —
+ * one bad item never cancels its siblings. Workers pull from a shared cursor, so
+ * a slow item doesn't stall the others. `concurrency` is clamped to
+ * `[1, items.length]`.
+ */
+export async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<PoolOutcome<R>> {
+  // Sparse by index: a failed item leaves a hole, filtered out by callers while
+  // successes keep their input position.
+  const results: (R | undefined)[] = [];
+  const failures: PoolFailure[] = [];
+  let cursor = 0;
+  const runner = async (): Promise<void> => {
+    // No await between reading and advancing the cursor, so each index is
+    // claimed by exactly one runner.
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      const item = items[index] as T;
+      try {
+        // oxlint-disable-next-line no-await-in-loop
+        results[index] = await worker(item, index);
+      } catch (reason) {
+        failures.push({ index, reason });
+      }
+    }
+  };
+  const lanes = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: lanes }, () => runner()));
+  return { results, failures };
+}
+
+/** Builds the aggregate error thrown when a fanned-out step had failures:
+ * "<step>: N of M <unit> failed — <labels>", carrying the first reason as cause. */
+export function poolFailureError(
+  step: string,
+  unit: string,
+  total: number,
+  failures: PoolFailure[],
+  label: (index: number) => string,
+): Error {
+  const detail = failures
+    .toSorted((a, b) => a.index - b.index)
+    .map((failure) => `${label(failure.index)} (${describeReason(failure.reason)})`)
+    .join(", ");
+  return new Error(`${step}: ${failures.length} of ${total} ${unit} failed — ${detail}`, {
+    cause: failures[0]?.reason,
+  });
+}
+
+function describeReason(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
 /** One generated media asset (image, audio, …): the fal request id (doubles as
  * a publish reference) and the fal-hosted URL to download. */
 export interface GeneratedAsset {

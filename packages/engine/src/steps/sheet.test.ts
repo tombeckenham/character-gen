@@ -248,21 +248,24 @@ test("runSheet keeps the failed variant's request_id and the master intact on va
   try {
     const character = await seedCharacter(db);
     const { generator } = fakeGenerator();
-    // Master downloads fine; the first variant (expression) 404s on download.
+    // Master downloads fine; the expression variant 404s on download while the
+    // outfit variant (running concurrently) succeeds.
     const fetchImpl = fakeFetch(new Set(["https://fal.media/edit-0.png"]));
 
     await assert.rejects(
       () => runSheet(character, { db, generator, mediaDir, fetchImpl }),
-      /Failed to download image \(HTTP 404\)/u,
+      /sheet: 1 of 2 variants failed — expression \(Failed to download image \(HTTP 404\)/u,
     );
 
     const stored = await db.getAssets(character.id);
-    assert.equal(stored.length, 2);
+    assert.equal(stored.length, 3);
     const master = stored.find((a) => a.kind === "master");
     const expression = stored.find((a) => a.kind === "expression");
+    const outfit = stored.find((a) => a.kind === "outfit");
     assert.ok(master?.localPath, "master downloaded and has a path");
     assert.equal(expression?.falRequestId, "req-edit-0");
     assert.equal(expression?.localPath, null);
+    assert.ok(outfit?.localPath, "the concurrent outfit variant still downloaded");
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

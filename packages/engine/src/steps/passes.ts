@@ -21,7 +21,15 @@ import type {
 import { findMasterUrl } from "./turnaround.ts";
 import { EDIT_ENDPOINT } from "./sheet.ts";
 import type { ImageGenerator } from "./sheet.ts";
-import { dedupedReporter, ensureCharacterMediaDir, storeAsset, withStepStatus } from "./common.ts";
+import {
+  DEFAULT_GEN_CONCURRENCY,
+  dedupedReporter,
+  ensureCharacterMediaDir,
+  mapPool,
+  poolFailureError,
+  storeAsset,
+  withStepStatus,
+} from "./common.ts";
 import type { StepMediaDeps } from "./common.ts";
 
 const IDENTITY_PREAMBLE =
@@ -136,8 +144,10 @@ export interface RunSheetPassesDeps extends StepMediaDeps {
   passes: readonly SheetPass[];
   /** Detail-macro budget for the `details` pass (tier-dependent). */
   detailCap?: number;
+  /** Max shot generations in flight (defaults to DEFAULT_GEN_CONCURRENCY). */
+  concurrency?: number;
   /** Called after each asset is stored — the CLI refreshes the gallery here so
-   * an open page fills in pass by pass. Failures warn, never abort. */
+   * an open page fills in shot by shot as each lands. Failures warn, never abort. */
   onAsset?: (asset: AssetRecord) => void | Promise<void>;
 }
 
@@ -201,16 +211,79 @@ function slugForFile(label: string, index: number): string {
   return slug.length > 0 ? `${slug}-${index + 1}` : String(index + 1);
 }
 
+/** One shot flattened out of its pass, with a display label for progress. */
+interface FlatShot {
+  label: string;
+  shot: ShotSpec;
+}
+
+/** Flattens the requested passes (in canonical order) into a single shot list —
+ * every shot is an independent edit of the master, so they fan out together. */
+function flattenShots(
+  passes: readonly SheetPass[],
+  profile: CharacterProfile,
+  detailCap: number,
+): FlatShot[] {
+  const flat: FlatShot[] = [];
+  for (const pass of passes) {
+    const shots = passShots(pass, profile, detailCap);
+    shots.forEach((shot, index) => {
+      flat.push({ label: `${pass} ${index + 1}/${shots.length}`, shot });
+    });
+  }
+  return flat;
+}
+
+/** Everything one shot-worker needs beyond the shot itself. */
+interface ShotContext {
+  deps: RunSheetPassesDeps;
+  character: CharacterRecord;
+  charDir: string;
+  masterUrl: string;
+  report: (message: string) => void;
+}
+
+/** Generates, stores, and announces one pass shot as an edit of the master. */
+async function generateShot(flat: FlatShot, ctx: ShotContext): Promise<AssetRecord> {
+  const { deps, character, charDir, masterUrl, report } = ctx;
+  const { label, shot } = flat;
+  report(`${label}: generating…`);
+  const image = await deps.generator.edit(
+    { prompt: shot.prompt, imageUrls: [masterUrl] },
+    (update) => report(`${label}: ${update.status.toLowerCase()}`),
+  );
+  const asset = await storeAsset({
+    deps,
+    character,
+    charDir,
+    kind: shot.kind,
+    fileName: shot.fileName,
+    image,
+    meta: { endpoint: EDIT_ENDPOINT, prompt: shot.prompt, sourceUrl: masterUrl, ...shot.meta },
+  });
+  try {
+    await deps.onAsset?.(asset);
+  } catch (error) {
+    // The shot is billed and stored; a throwing notification sink must not turn
+    // that into a failed pass.
+    report(
+      `warning: asset notification failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  return asset;
+}
+
 /**
  * Runs the requested rich-sheet passes, each shot an edit of the master image,
  * storing every asset (kind + meta.label/subject) under the `sheet` status
- * step. Passes run in canonical order and a failing shot aborts the run (status
- * `error`, already-produced assets intact) — the money-guard: nothing generates
- * past a failure. Requires a completed core sheet (a master with a fal URL).
+ * step. Shots across all passes fan out concurrently (bounded by `concurrency`),
+ * each landing via `onAsset` as it is stored. If any shot fails the others still
+ * finish, then the step is marked `error` and an aggregate error is thrown, with
+ * the assets that did land intact (a re-run regenerates them). Requires a
+ * completed core sheet (a master with a fal URL).
  */
-// The per-shot loop and its status/notification bookkeeping read as one linear
-// sequence; splitting it would scatter the failure handling (turnaround precedent).
-// oxlint-disable-next-line max-lines-per-function
 export async function runSheetPasses(
   character: CharacterRecord,
   deps: RunSheetPassesDeps,
@@ -228,48 +301,18 @@ export async function runSheetPasses(
   }
 
   return withStepStatus(deps.db, character.id, "sheet", report, async () => {
-    const produced: AssetRecord[] = [];
-    for (const pass of passes) {
-      const shots = passShots(pass, character.profile, detailCap);
-      for (const [shotIndex, shot] of shots.entries()) {
-        const label = `${pass} ${shotIndex + 1}/${shots.length}`;
-        report(`${label}: generating…`);
-        // Shots run sequentially so progress reads cleanly and a failure leaves
-        // a clean prefix of stored assets (and stops all spending).
-        // oxlint-disable-next-line no-await-in-loop
-        const image = await deps.generator.edit(
-          { prompt: shot.prompt, imageUrls: [masterUrl] },
-          (update) => report(`${label}: ${update.status.toLowerCase()}`),
-        );
-        // oxlint-disable-next-line no-await-in-loop
-        const asset = await storeAsset({
-          deps,
-          character,
-          charDir,
-          kind: shot.kind,
-          fileName: shot.fileName,
-          image,
-          meta: {
-            endpoint: EDIT_ENDPOINT,
-            prompt: shot.prompt,
-            sourceUrl: masterUrl,
-            ...shot.meta,
-          },
-        });
-        produced.push(asset);
-        try {
-          // oxlint-disable-next-line no-await-in-loop
-          await deps.onAsset?.(asset);
-        } catch (error) {
-          // The shot is billed and stored; a throwing notification sink must
-          // not turn that into a failed pass.
-          report(
-            `warning: asset notification failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
+    const flat = flattenShots(passes, character.profile, detailCap);
+    const ctx: ShotContext = { deps, character, charDir, masterUrl, report };
+    const { results, failures } = await mapPool(
+      flat,
+      deps.concurrency ?? DEFAULT_GEN_CONCURRENCY,
+      (shot) => generateShot(shot, ctx),
+    );
+    const produced = results.filter((asset): asset is AssetRecord => asset !== undefined);
+    if (failures.length > 0) {
+      throw poolFailureError("sheet passes", "shots", flat.length, failures, (index) => {
+        return flat[index]?.label ?? `shot ${index + 1}`;
+      });
     }
     return { assets: produced };
   });

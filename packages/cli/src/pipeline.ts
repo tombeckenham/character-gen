@@ -119,6 +119,9 @@ export function runSheetAndReport(
       generator,
       mediaDir: paths.mediaDir,
       onProgress: progressWithLiveStart(db, paths),
+      // Per-asset refresh so the master and each variant land in an open gallery
+      // as they arrive, not as one batch at the end.
+      onAsset: () => refreshGallery(db, paths),
     });
     return [
       `Sheet complete for ${character.identifier}: master + ${outcome.variants.length} variants.`,

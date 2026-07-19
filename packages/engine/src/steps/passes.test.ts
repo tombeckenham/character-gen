@@ -178,11 +178,12 @@ test("runSheetPasses runs passes independently (scale alone) in canonical order"
   }
 });
 
-test("runSheetPasses money-guard: a failing shot aborts everything after it", async () => {
+test("runSheetPasses: a failing shot doesn't abort its siblings, step marked error", async () => {
   const { db, dir, mediaDir } = setup();
   try {
     const character = await seedWithMaster(db);
-    // Fail the last face shot; expressions/details must never generate.
+    // Shots fan out concurrently starting in flat order, so the 3rd edit is the
+    // third face view (face_profile); fail it and the rest must still generate.
     const { generator, edits } = fakeEditor({ failEditIndex: 2 });
 
     await assert.rejects(
@@ -194,16 +195,15 @@ test("runSheetPasses money-guard: a failing shot aborts everything after it", as
           fetchImpl: fakeFetch,
           passes: ["face", "expressions", "details"],
         }),
-      /edit 2 boom/u,
+      /sheet passes: 1 of \d+ shots failed — face 3\/3 \(edit 2 boom\)/u,
     );
 
-    assert.equal(edits.length, 3, "no shot ran past the failure");
-    // The two completed faces survive; the step is marked error.
-    const stored = await db.getAssets(character.id);
-    assert.deepEqual(
-      stored.map((asset) => asset.kind),
-      ["master", "face_front", "face_three_quarter"],
-    );
+    // The old "stop at the failure" guard is gone: every shot was attempted.
+    assert.ok(edits.length > 3, "sibling and later-pass shots still ran");
+    const kinds = new Set((await db.getAssets(character.id)).map((asset) => asset.kind));
+    assert.ok(kinds.has("face_front") && kinds.has("face_three_quarter"), "the other faces landed");
+    assert.ok(!kinds.has("face_profile"), "the failed shot did not land");
+    assert.ok(kinds.has("expression"), "a later-pass sibling still generated");
     const refreshed = await db.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "error");
   } finally {

@@ -2,9 +2,12 @@ import type { FalClient } from "../fal.ts";
 import { angleKind, TURNAROUND_ANGLES } from "../types.ts";
 import type { AssetRecord, CharacterRecord, TurnaroundAngle } from "../types.ts";
 import {
+  DEFAULT_GEN_CONCURRENCY,
   dedupedReporter,
   ensureCharacterMediaDir,
   extractImageUrl,
+  mapPool,
+  poolFailureError,
   storeAsset,
   withStepStatus,
 } from "./common.ts";
@@ -49,8 +52,10 @@ export interface RunTurnaroundDeps extends StepMediaDeps {
   /** Angles to generate (defaults to all 8). Parameterized so tests can run a
    * cheap subset; the CLI always runs the full set. */
   angles?: readonly TurnaroundAngle[];
+  /** Max angle generations in flight (defaults to DEFAULT_GEN_CONCURRENCY). */
+  concurrency?: number;
   /** Called after each frame is stored — the CLI refreshes the gallery here so
-   * an open page shows frames arriving one by one. Failures are reported as
+   * an open page shows frames arriving as each lands. Failures are reported as
    * warnings and do not abort the run. */
   onFrame?: (frame: AssetRecord) => void | Promise<void>;
 }
@@ -80,17 +85,57 @@ export async function findMasterUrl(
   return null;
 }
 
+/** Everything one angle-worker needs beyond the angle itself. */
+interface FrameContext {
+  deps: RunTurnaroundDeps;
+  character: CharacterRecord;
+  charDir: string;
+  masterUrl: string;
+  report: (message: string) => void;
+}
+
+/** Generates, stores, and announces one turnaround frame. */
+async function generateFrame(angle: TurnaroundAngle, ctx: FrameContext): Promise<AssetRecord> {
+  const { deps, character, charDir, masterUrl, report } = ctx;
+  report(`angle ${angle}°: generating…`);
+  const image = await deps.generator.angle(
+    { imageUrl: masterUrl, horizontalAngle: angle },
+    (update) => report(`angle ${angle}°: ${update.status.toLowerCase()}`),
+  );
+  const asset = await storeAsset({
+    deps,
+    character,
+    charDir,
+    kind: angleKind(angle),
+    fileName: `angle-${angle}.png`,
+    image,
+    meta: { endpoint: TURNAROUND_ENDPOINT, horizontalAngle: angle, sourceUrl: masterUrl },
+  });
+  try {
+    await deps.onFrame?.(asset);
+  } catch (error) {
+    // The frame is billed and stored; a throwing notification sink must not turn
+    // that into a failed turnaround.
+    report(
+      `warning: frame notification failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  return asset;
+}
+
 /**
  * Generates the turnaround frames — one image per angle, shot from the master —
  * downloading each to `<mediaDir>/<identifier>/` and recording an asset row
- * (kind `angle_<deg>`, with the fal request id) per frame. Marks the
- * `turnaround` status running → done; on failure marks it `error` and rethrows,
- * leaving frames already produced intact. Requires a completed sheet step (a
- * master image with a fal URL).
+ * (kind `angle_<deg>`, with the fal request id) per frame. Angles are generated
+ * concurrently (bounded by `concurrency`), each frame landing via `onFrame` as
+ * soon as it is stored. Marks the `turnaround` status running → done; if any
+ * angle fails the others still finish, then the step is marked `error` and an
+ * aggregate error is thrown, leaving the frames that did land intact (a re-run
+ * regenerates all angles). Requires a completed sheet step (a master image with
+ * a fal URL).
  */
-// The per-angle loop and its status/notification bookkeeping read as one linear
-// sequence; splitting it would scatter the failure handling.
-// oxlint-disable-next-line max-lines-per-function
 export async function runTurnaround(
   character: CharacterRecord,
   deps: RunTurnaroundDeps,
@@ -107,39 +152,19 @@ export async function runTurnaround(
   }
 
   return withStepStatus(deps.db, character.id, "turnaround", report, async () => {
-    const frames: AssetRecord[] = [];
-    for (const angle of angles) {
-      report(`angle ${angle}°: generating…`);
-      // Frames are generated sequentially so progress reads cleanly and a
-      // failure leaves a clean prefix of completed angles.
-      // oxlint-disable-next-line no-await-in-loop
-      const image = await deps.generator.angle(
-        { imageUrl: masterUrl, horizontalAngle: angle },
-        (update) => report(`angle ${angle}°: ${update.status.toLowerCase()}`),
-      );
-      // oxlint-disable-next-line no-await-in-loop
-      const asset = await storeAsset({
-        deps,
-        character,
-        charDir,
-        kind: angleKind(angle),
-        fileName: `angle-${angle}.png`,
-        image,
-        meta: { endpoint: TURNAROUND_ENDPOINT, horizontalAngle: angle, sourceUrl: masterUrl },
+    const ctx: FrameContext = { deps, character, charDir, masterUrl, report };
+    const { results, failures } = await mapPool(
+      angles,
+      deps.concurrency ?? DEFAULT_GEN_CONCURRENCY,
+      (angle) => generateFrame(angle, ctx),
+    );
+    // Index-ordered results keep frames in angle order regardless of which
+    // finished first; failed angles leave a gap that is filtered out.
+    const frames = results.filter((frame): frame is AssetRecord => frame !== undefined);
+    if (failures.length > 0) {
+      throw poolFailureError("turnaround", "angles", angles.length, failures, (index) => {
+        return `${angles[index]}°`;
       });
-      frames.push(asset);
-      try {
-        // oxlint-disable-next-line no-await-in-loop
-        await deps.onFrame?.(asset);
-      } catch (error) {
-        // The frame is billed and stored; a throwing notification sink must not
-        // turn that into a failed turnaround.
-        report(
-          `warning: frame notification failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
     }
     return { frames };
   });
