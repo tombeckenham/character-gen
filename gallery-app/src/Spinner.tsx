@@ -32,13 +32,30 @@ interface DragState {
 // One interaction surface: the drag/wheel/keyboard handlers and the frame
 // stack belong to the same stage element; splitting would scatter drag state.
 // oxlint-disable-next-line max-lines-per-function -- one cohesive gesture/render unit
-export function TurnaroundSpinner({ frames, name }: { frames: SpinnerFrame[]; name: string }) {
+export function TurnaroundSpinner({
+  frames,
+  name,
+  variant = "detail",
+}: {
+  frames: SpinnerFrame[];
+  name: string;
+  /**
+   * "card" is the grid-thumbnail form: no caption or chrome, no wheel capture
+   * (the grid must keep scrolling), not separately focusable (it sits inside
+   * the card's Link), and a real drag swallows the click so spinning never
+   * navigates.
+   */
+  variant?: "detail" | "card";
+}) {
   const [rawIndex, setRawIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
   // Frames whose media failed to load; they drop out of the scrub set rather
   // than showing the browser's broken-image icon at that angle.
   const [brokenPaths, setBrokenPaths] = useState<ReadonlySet<string>>(new Set());
   const dragRef = useRef<DragState | null>(null);
+  // True once the current press actually scrubbed; the following click is
+  // then swallowed so a card-variant drag doesn't trigger the wrapping Link.
+  const scrubbedRef = useRef(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const indexRef = useRef(0);
   // Sub-threshold wheel travel carried between events (see reduceWheelSpin).
@@ -88,7 +105,7 @@ export function TurnaroundSpinner({ frames, name }: { frames: SpinnerFrame[]; na
   // also scroll the page, so the non-passive listener is attached by hand.
   useEffect(() => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || variant === "card") return;
     const count = usable.length;
     const onWheel = (event: WheelEvent): void => {
       event.preventDefault();
@@ -102,7 +119,7 @@ export function TurnaroundSpinner({ frames, name }: { frames: SpinnerFrame[]; na
     };
     stage.addEventListener("wheel", onWheel, { passive: false });
     return () => stage.removeEventListener("wheel", onWheel);
-  }, [usable.length]);
+  }, [usable.length, variant]);
 
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const drag = dragRef.current;
@@ -126,71 +143,95 @@ export function TurnaroundSpinner({ frames, name }: { frames: SpinnerFrame[]; na
     return <p className="text-muted-foreground italic">Turnaround frames failed to load.</p>;
   }
 
+  // The detail page owns slider semantics and keyboard focus; the card
+  // thumbnail must not add a focusable widget inside its Link, so it exposes
+  // the stage as decoration only.
+  const sliderProps =
+    variant === "detail"
+      ? {
+          role: "slider",
+          tabIndex: 0,
+          "aria-label": `${name} turnaround — drag, scroll, or use arrow keys to spin`,
+          "aria-valuenow": active.angle,
+          "aria-valuemin": usable[0]?.angle ?? 0,
+          "aria-valuemax": usable.at(-1)?.angle ?? 0,
+          "aria-valuetext": `${active.angle} degrees`,
+          onKeyDown: stepFrame,
+        }
+      : { "aria-hidden": true };
+
+  const stage = (
+    <div
+      ref={stageRef}
+      className={`relative aspect-3/4 w-full touch-none overflow-hidden bg-muted/20 select-none ${
+        variant === "detail"
+          ? "max-w-sm rounded-lg ring-1 ring-foreground/10 focus-visible:outline-2"
+          : ""
+      } ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+      {...sliderProps}
+      onClick={(event) => {
+        if (!scrubbedRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerDown={(event) => {
+        // Grabbing the stage catches a coasting spin.
+        stopKinetic();
+        scrubbedRef.current = false;
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startIndex: index,
+          samples: [{ x: event.clientX, t: event.timeStamp }],
+        };
+        setDragging(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        if (Math.abs(event.clientX - drag.startX) > 4) scrubbedRef.current = true;
+        drag.samples.push({ x: event.clientX, t: event.timeStamp });
+        // Only the flick window matters; keep the buffer tiny.
+        while (
+          drag.samples.length > 1 &&
+          event.timeStamp - (drag.samples[0]?.t ?? 0) > FLICK_SAMPLE_WINDOW_MS * 2
+        ) {
+          drag.samples.shift();
+        }
+        setRawIndex(
+          frameIndexFromDrag(drag.startIndex, event.clientX - drag.startX, usable.length),
+        );
+      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      {usable.map((frame, frameIndex) => (
+        <img
+          key={frame.path}
+          src={frame.path}
+          alt={`${name} — ${frame.angle}° view`}
+          draggable={false}
+          onError={() =>
+            setBrokenPaths((previous) =>
+              previous.has(frame.path) ? previous : new Set(previous).add(frame.path),
+            )
+          }
+          className={`absolute inset-0 h-full w-full object-contain ${
+            frameIndex === index ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      ))}
+      <span className="absolute right-3 bottom-2 font-mono text-xs text-muted-foreground">
+        {active.angle}°
+      </span>
+    </div>
+  );
+
+  if (variant === "card") return stage;
   return (
     <div>
-      <div
-        ref={stageRef}
-        className={`relative aspect-3/4 w-full max-w-sm touch-none overflow-hidden rounded-lg bg-muted/20 ring-1 ring-foreground/10 select-none focus-visible:outline-2 ${
-          dragging ? "cursor-grabbing" : "cursor-grab"
-        }`}
-        role="slider"
-        tabIndex={0}
-        aria-label={`${name} turnaround — drag, scroll, or use arrow keys to spin`}
-        aria-valuenow={active.angle}
-        aria-valuemin={usable[0]?.angle ?? 0}
-        aria-valuemax={usable.at(-1)?.angle ?? 0}
-        aria-valuetext={`${active.angle} degrees`}
-        onKeyDown={stepFrame}
-        onPointerDown={(event) => {
-          // Grabbing the stage catches a coasting spin.
-          stopKinetic();
-          dragRef.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startIndex: index,
-            samples: [{ x: event.clientX, t: event.timeStamp }],
-          };
-          setDragging(true);
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current;
-          if (!drag || drag.pointerId !== event.pointerId) return;
-          drag.samples.push({ x: event.clientX, t: event.timeStamp });
-          // Only the flick window matters; keep the buffer tiny.
-          while (
-            drag.samples.length > 1 &&
-            event.timeStamp - (drag.samples[0]?.t ?? 0) > FLICK_SAMPLE_WINDOW_MS * 2
-          ) {
-            drag.samples.shift();
-          }
-          setRawIndex(
-            frameIndexFromDrag(drag.startIndex, event.clientX - drag.startX, usable.length),
-          );
-        }}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-      >
-        {usable.map((frame, frameIndex) => (
-          <img
-            key={frame.path}
-            src={frame.path}
-            alt={`${name} — ${frame.angle}° view`}
-            draggable={false}
-            onError={() =>
-              setBrokenPaths((previous) =>
-                previous.has(frame.path) ? previous : new Set(previous).add(frame.path),
-              )
-            }
-            className={`absolute inset-0 h-full w-full object-contain ${
-              frameIndex === index ? "opacity-100" : "opacity-0"
-            }`}
-          />
-        ))}
-        <span className="absolute right-3 bottom-2 font-mono text-xs text-muted-foreground">
-          {active.angle}°
-        </span>
-      </div>
+      {stage}
       <p className="mt-2 text-xs text-muted-foreground">
         drag or flick to spin · scroll to rotate · {usable.length}/{TURNAROUND_ANGLES.length} frame
         {usable.length === 1 ? "" : "s"}
