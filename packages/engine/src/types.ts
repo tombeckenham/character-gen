@@ -46,7 +46,11 @@ export type PipelineStep = (typeof PIPELINE_STEPS)[number];
  * PIPELINE_STEPS are recognized (for clear "not built yet" errors) but not
  * implemented. This is the single list a future phase flips a step on in.
  */
-export const IMPLEMENTED_STEPS = ["profile", "sheet", "turnaround"] as const;
+export const IMPLEMENTED_STEPS = [
+  "profile",
+  "sheet",
+  "turnaround",
+] as const satisfies readonly PipelineStep[];
 
 export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];
 

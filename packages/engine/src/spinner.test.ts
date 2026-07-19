@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import {
   DRAG_PIXELS_PER_FRAME,
   frameIndexFromDrag,
-  frameIndexFromWheel,
+  reduceWheelSpin,
   selectSpinnerFrames,
+  WHEEL_DELTA_PER_FRAME,
   wrapFrameIndex,
 } from "./spinner.ts";
 
@@ -65,10 +66,56 @@ test("frameIndexFromDrag honors a custom sensitivity and fewer frames", () => {
   assert.equal(frameIndexFromDrag(2, 0, 0), 0);
 });
 
-test("frameIndexFromWheel steps one frame per tick, wrapping", () => {
-  assert.equal(frameIndexFromWheel(0, 120, 8), 1);
-  assert.equal(frameIndexFromWheel(0, -3, 8), 7);
-  assert.equal(frameIndexFromWheel(7, 1, 8), 0);
-  assert.equal(frameIndexFromWheel(4, 0, 8), 4);
-  assert.equal(frameIndexFromWheel(4, 1, 0), 0);
+test("frameIndexFromDrag treats sub-threshold travel as a dead zone in both directions", () => {
+  assert.equal(frameIndexFromDrag(3, DRAG_PIXELS_PER_FRAME - 1, 8), 3);
+  assert.equal(frameIndexFromDrag(3, -(DRAG_PIXELS_PER_FRAME - 1), 8), 3);
+});
+
+test("frameIndexFromDrag guards a non-positive sensitivity", () => {
+  assert.equal(frameIndexFromDrag(3, 500, 8, 0), 3);
+  assert.equal(frameIndexFromDrag(9, 500, 8, -5), 1);
+});
+
+test("reduceWheelSpin accumulates small trackpad deltas up to the threshold", () => {
+  let spin = { index: 0, accumulated: 0 };
+  spin = reduceWheelSpin(spin, 40, 8);
+  assert.deepEqual(spin, { index: 0, accumulated: 40 });
+  spin = reduceWheelSpin(spin, 40, 8);
+  assert.deepEqual(spin, { index: 0, accumulated: 80 });
+  spin = reduceWheelSpin(spin, 40, 8);
+  assert.deepEqual(spin, { index: 1, accumulated: 20 });
+});
+
+test("reduceWheelSpin steps once per mouse notch and carries the remainder", () => {
+  const spin = reduceWheelSpin({ index: 0, accumulated: 0 }, 120, 8);
+  assert.deepEqual(spin, { index: 1, accumulated: 120 - WHEEL_DELTA_PER_FRAME });
+});
+
+test("reduceWheelSpin wraps backwards and can step multiple frames at once", () => {
+  assert.deepEqual(reduceWheelSpin({ index: 0, accumulated: 0 }, -WHEEL_DELTA_PER_FRAME, 8), {
+    index: 7,
+    accumulated: 0,
+  });
+  assert.deepEqual(reduceWheelSpin({ index: 2, accumulated: 0 }, WHEEL_DELTA_PER_FRAME * 3, 8), {
+    index: 5,
+    accumulated: 0,
+  });
+});
+
+test("reduceWheelSpin drops an opposing remainder on direction change", () => {
+  const forward = reduceWheelSpin({ index: 0, accumulated: 0 }, 90, 8);
+  assert.deepEqual(forward, { index: 0, accumulated: 90 });
+  // Reversing: the +90 toward the next frame must not absorb the first -30.
+  assert.deepEqual(reduceWheelSpin(forward, -30, 8), { index: 0, accumulated: -30 });
+});
+
+test("reduceWheelSpin is inert with no frames or a bad threshold", () => {
+  assert.deepEqual(reduceWheelSpin({ index: 4, accumulated: 10 }, 500, 0), {
+    index: 4,
+    accumulated: 10,
+  });
+  assert.deepEqual(reduceWheelSpin({ index: 4, accumulated: 10 }, 500, 8, 0), {
+    index: 4,
+    accumulated: 10,
+  });
 });

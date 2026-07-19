@@ -22,7 +22,7 @@ node packages/cli/src/index.ts <command> [args]
 | Command                                                                         | What it does                                                                                                                                                                |
 | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `character-gen create "<description>" [--profile-json <file>] [--steps <list>]` | Create a character and run pipeline steps. Steps available now: profile, sheet, turnaround; default is profile,sheet (turnaround is opt-in because it costs 8 generations). |
-| `character-gen list`                                                            | List all stored characters with per-step progress.                                                                                                                          |
+| `character-gen list`                                                            | List all stored characters with a done-step count (e.g. 2/5) and publish state.                                                                                             |
 | `character-gen show <id\|identifier>`                                           | Print a character's full profile JSON and assets (including fal request ids).                                                                                               |
 | `character-gen sheet <char>`                                                    | (Re)generate the master reference image + expression/outfit variants.                                                                                                       |
 | `character-gen turnaround <char>`                                               | Generate the 8-angle spin frames from the master (requires a completed sheet).                                                                                              |
@@ -30,9 +30,11 @@ node packages/cli/src/index.ts <command> [args]
 | `character-gen setup [--api-key <key>]`                                         | Validate and store a fal API key.                                                                                                                                           |
 | `character-gen doctor`                                                          | Diagnose Node version, key source, fal connectivity, and DB health.                                                                                                         |
 
-Coming soon (recognized but not implemented yet): `character-gen voice`, `character-gen speak`, `character-gen publish`, `character-gen extract`.
+Coming soon (recognized but not implemented yet — do not run them): voice, speak, publish, extract.
 
 Every command supports `--help`.
+
+If a command exits non-zero, report the failure to the user; do not continue to the next step.
 
 ## Which command when
 

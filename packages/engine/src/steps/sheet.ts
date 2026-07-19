@@ -4,13 +4,13 @@ import {
   dedupedReporter,
   ensureCharacterMediaDir,
   extractImageUrl,
-  storeImage,
+  storeAsset,
   withStepStatus,
 } from "./common.ts";
-import type { GeneratedImage, GenProgress, StepMediaDeps } from "./common.ts";
+import type { GeneratedAsset, GenProgress, StepMediaDeps } from "./common.ts";
 
 export { DEFAULT_DOWNLOAD_TIMEOUT_MS } from "./common.ts";
-export type { GeneratedImage, GenProgress } from "./common.ts";
+export type { GeneratedAsset, GenProgress } from "./common.ts";
 
 /** Master reference model + the edit model used for all derived variants. */
 export const MASTER_ENDPOINT = "openai/gpt-image-2";
@@ -38,8 +38,8 @@ export interface ImageGenerator {
   generate(
     input: ImageGenInput,
     onProgress?: (update: GenProgress) => void,
-  ): Promise<GeneratedImage>;
-  edit(input: ImageEditInput, onProgress?: (update: GenProgress) => void): Promise<GeneratedImage>;
+  ): Promise<GeneratedAsset>;
+  edit(input: ImageEditInput, onProgress?: (update: GenProgress) => void): Promise<GeneratedAsset>;
 }
 
 /**
@@ -155,7 +155,7 @@ export async function runSheet(
       { prompt: masterPrompt, imageSize: MASTER_IMAGE_SIZE },
       (update) => report(`master: ${update.status.toLowerCase()}`),
     );
-    const master = await storeImage({
+    const master = await storeAsset({
       deps,
       character,
       charDir,
@@ -176,7 +176,7 @@ export async function runSheet(
         report(`${spec.kind}: ${update.status.toLowerCase()}`),
       );
       // oxlint-disable-next-line no-await-in-loop
-      const asset = await storeImage({
+      const asset = await storeAsset({
         deps,
         character,
         charDir,

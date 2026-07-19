@@ -11,9 +11,9 @@ import type { Database } from "../db/index.ts";
  * PNG fetch legitimately takes longer. */
 export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
-/** One generated image: the fal request id (doubles as a publish reference) and
- * the fal-hosted URL to download. */
-export interface GeneratedImage {
+/** One generated media asset (image, audio, …): the fal request id (doubles as
+ * a publish reference) and the fal-hosted URL to download. */
+export interface GeneratedAsset {
   requestId: string;
   url: string;
 }
@@ -31,7 +31,7 @@ export interface StepMediaDeps {
   mediaDir: string;
   /** Injectable downloader so tests avoid the network (defaults to global fetch). */
   fetchImpl?: FetchImpl;
-  /** Per-image download timeout (defaults to DEFAULT_DOWNLOAD_TIMEOUT_MS). */
+  /** Per-asset download timeout (defaults to DEFAULT_DOWNLOAD_TIMEOUT_MS). */
   downloadTimeoutMs?: number;
   /** Progress sink for queue updates and step transitions (defaults to no-op). */
   onProgress?: (message: string) => void;
@@ -87,8 +87,9 @@ export function ensureCharacterMediaDir(
 
 /**
  * Runs `work` under the step's status lifecycle: running → done, or error on
- * failure (assets already produced stay intact). The error-status write must
- * never mask the real failure — it is reported and the original error rethrown.
+ * failure (assets already produced stay intact). If the error-status write
+ * itself fails, that write failure is reported as a warning and the original
+ * work error is rethrown — the status write must never mask the real failure.
  */
 export async function withStepStatus<T>(
   db: Database,
@@ -128,13 +129,13 @@ async function downloadTo(
   writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
 }
 
-export interface StoreImageArgs {
+export interface StoreAssetArgs {
   deps: StepMediaDeps;
   character: CharacterRecord;
   charDir: string;
   kind: AssetRecord["kind"];
   fileName: string;
-  image: GeneratedImage;
+  image: GeneratedAsset;
   meta: Record<string, unknown>;
 }
 
@@ -143,7 +144,7 @@ export interface StoreImageArgs {
  * the file and patches in the local path. A download failure leaves the row with
  * a null `local_path` so the request_id stays referenceable for publish/retry.
  */
-export async function storeImage(args: StoreImageArgs): Promise<AssetRecord> {
+export async function storeAsset(args: StoreAssetArgs): Promise<AssetRecord> {
   const { deps, character, charDir, kind, fileName, image, meta } = args;
   const asset = await deps.db.insertAsset({
     characterId: character.id,

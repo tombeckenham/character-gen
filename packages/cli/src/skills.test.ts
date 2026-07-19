@@ -4,7 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { COMMAND_HELP } from "./help.ts";
+import { PIPELINE_STEPS } from "@character-gen/engine";
+import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
+import { STUBS } from "./run.ts";
 
 const SKILLS_DIR = join(import.meta.dirname, "..", "..", "..", "skills");
 
@@ -46,14 +48,17 @@ test("every skill has parseable frontmatter with name and description", () => {
   }
 });
 
-test("every CLI command referenced in a skill's code exists in the CLI", () => {
+/** Code spans/fences only — prose may say "the character-gen CLI". */
+function codeChunks(body: string): string[] {
+  return body.match(/```[\s\S]*?```|`[^`\n]+`/gu) ?? [];
+}
+
+test("every CLI command referenced in a skill's code exists and is not a stub", () => {
   const commands = new Set(Object.keys(COMMAND_HELP));
   for (const dir of skillDirs()) {
     const skill = loadSkill(dir);
-    // Only code spans/fences count — prose may say "the character-gen CLI".
-    const codeChunks = skill.body.match(/```[\s\S]*?```|`[^`\n]+`/gu) ?? [];
     let references = 0;
-    for (const chunk of codeChunks) {
+    for (const chunk of codeChunks(skill.body)) {
       for (const match of chunk.matchAll(/character-gen\s+([a-z][a-z-]*)/gu)) {
         references += 1;
         const command = match[1];
@@ -61,8 +66,43 @@ test("every CLI command referenced in a skill's code exists in the CLI", () => {
           command !== undefined && commands.has(command),
           `${dir}: references unknown command "character-gen ${command}"`,
         );
+        // A skill must never direct Claude at a recognized-but-unbuilt command.
+        assert.ok(
+          !STUBS.has(command),
+          `${dir}: references not-yet-implemented command "character-gen ${command}"`,
+        );
       }
     }
     assert.ok(references > 0, `${dir}: expected at least one CLI command reference`);
+  }
+});
+
+test("every flag referenced in a skill's code appears in the CLI help", () => {
+  const helpText = [ROOT_HELP, ...Object.values(COMMAND_HELP)].join("\n");
+  for (const dir of skillDirs()) {
+    const skill = loadSkill(dir);
+    for (const chunk of codeChunks(skill.body)) {
+      for (const match of chunk.matchAll(/(--[a-z][a-z-]*)/gu)) {
+        const flag = match[1];
+        assert.ok(
+          flag !== undefined && helpText.includes(flag),
+          `${dir}: references flag "${flag}" not present in any help text`,
+        );
+      }
+    }
+  }
+});
+
+test("every --steps list in a skill's code names only real pipeline steps", () => {
+  const steps = new Set<string>(PIPELINE_STEPS);
+  for (const dir of skillDirs()) {
+    const skill = loadSkill(dir);
+    for (const chunk of codeChunks(skill.body)) {
+      for (const match of chunk.matchAll(/--steps\s+([a-z][a-z,]*)/gu)) {
+        for (const step of (match[1] ?? "").split(",").filter((s) => s.length > 0)) {
+          assert.ok(steps.has(step), `${dir}: --steps names unknown step "${step}"`);
+        }
+      }
+    }
   }
 });

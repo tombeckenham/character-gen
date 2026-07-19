@@ -25,9 +25,11 @@ Generates 8 views of an existing character at 45° increments (0° front → 315
 
    This is 8 image generations run sequentially — expect a few minutes. Progress streams per angle.
 
-5. Report: point the user at the character's detail page in the gallery — click the card, then **drag horizontally or scroll on the turnaround image to spin the character**. Mention frame count and any angle that failed.
+5. Report: point the user at the character's detail page in the gallery — click the card, then **drag horizontally or scroll on the turnaround image to spin the character**. Say how many of the 8 frames landed; a failure stops the run at that angle, so if it stopped early, report where.
 
 ## Notes
+
+If a command exits non-zero, report the failure to the user; do not continue to the next step.
 
 - Re-running `character-gen turnaround` on the same character regenerates all 8 frames (e.g. after a new sheet); the spinner always shows the newest frame per angle.
 - "No master image found" → run `character-gen sheet <identifier>` first, then retry.

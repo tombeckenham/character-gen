@@ -14,10 +14,10 @@ export interface SpinnerFrame {
 
 /**
  * The frames the spinner scrubs through: one per turnaround angle, ascending
- * (frame 0 = front view). Non-angle assets are ignored; when an angle was
- * regenerated, the later (newer — assets arrive oldest-first) entry wins.
- * Missing intermediate angles are simply absent, so the spin covers whatever
- * exists in angle order.
+ * (frame 0 is the lowest angle present — the front view once angle_0 exists).
+ * Non-angle assets are ignored; when an angle was regenerated, the later
+ * (newer — assets arrive oldest-first) entry wins. Missing intermediate angles
+ * are simply absent, so the spin covers whatever exists in angle order.
  */
 export function selectSpinnerFrames(
   assets: ReadonlyArray<{ kind: string; path: string }>,
@@ -50,11 +50,41 @@ export function frameIndexFromDrag(
   count: number,
   pixelsPerFrame: number = DRAG_PIXELS_PER_FRAME,
 ): number {
+  if (pixelsPerFrame <= 0) return wrapFrameIndex(startIndex, count);
   const steps = Math.trunc(deltaX / pixelsPerFrame);
   return wrapFrameIndex(startIndex + steps, count);
 }
 
-/** One wheel tick rotates one frame in the scroll direction, wrapping. */
-export function frameIndexFromWheel(currentIndex: number, deltaY: number, count: number): number {
-  return wrapFrameIndex(currentIndex + Math.sign(deltaY), count);
+/** Wheel travel that advances one frame: one mouse-wheel notch (~120), or an
+ * equivalent run of the small deltas a trackpad emits. */
+export const WHEEL_DELTA_PER_FRAME = 100;
+
+export interface WheelSpin {
+  index: number;
+  /** Wheel delta accumulated toward the next step (|accumulated| < threshold). */
+  accumulated: number;
+}
+
+/**
+ * Folds one wheel event into the spin. Deltas accumulate until a full
+ * `deltaPerFrame` of travel is reached, then the index steps (wrapping) and
+ * the remainder carries over — trackpads emit dozens of small-delta events per
+ * gesture, so stepping once per event would momentum-spin wildly. Reversing
+ * scroll direction drops any opposing remainder, so a direction change
+ * responds immediately.
+ */
+export function reduceWheelSpin(
+  spin: WheelSpin,
+  deltaY: number,
+  count: number,
+  deltaPerFrame: number = WHEEL_DELTA_PER_FRAME,
+): WheelSpin {
+  if (count <= 0 || deltaPerFrame <= 0) return spin;
+  const carried = deltaY * spin.accumulated < 0 ? 0 : spin.accumulated;
+  const total = carried + deltaY;
+  const steps = Math.trunc(total / deltaPerFrame);
+  return {
+    index: wrapFrameIndex(spin.index + steps, count),
+    accumulated: total - steps * deltaPerFrame,
+  };
 }

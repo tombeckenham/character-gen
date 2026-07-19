@@ -14,8 +14,9 @@ import { cmdCreate } from "./create.ts";
 import { cmdSheet, cmdTurnaround } from "./pipeline.ts";
 import { cmdOpen } from "./open.ts";
 
-/** Pipeline commands that are recognized but not built yet. */
-const STUBS = new Set(["voice", "speak", "publish", "extract"]);
+/** Pipeline commands that are recognized but not built yet. Exported so the
+ * skills drift test can assert no skill directs Claude at a stub. */
+export const STUBS: ReadonlySet<string> = new Set(["voice", "speak", "publish", "extract"]);
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */

@@ -71,7 +71,7 @@ character-gen create --profile-json /tmp/<identifier>.json --steps profile,sheet
 character-gen open
 ```
 
-Run this early so the user watches the character materialize live: the card appears at profile, images fill in as the sheet lands, status chips pulse while steps run. The page polls every 2 seconds on its own.
+Run this early so the user watches the character materialize: the card appears the moment the character is created, the sheet images land together when that run finishes, and — the live moment — a turnaround fills in frame by frame as each angle is generated. The page polls every 2 seconds on its own.
 
 ### 5. Report
 
@@ -79,7 +79,10 @@ Tell the user: name, identifier, what was generated (with file paths from the CL
 
 ## Errors
 
+If a command exits non-zero, report the failure to the user; do not continue to the next step.
+
 - Key errors ("No fal API key found", 401s) → run `character-gen doctor` and follow its hint; usually `character-gen setup`.
 - "No master image found" on the turnaround step → the sheet must finish first: `character-gen sheet <identifier>`, then `character-gen turnaround <identifier>`.
-- Identifier taken → suffix `-2` and retry.
-- A failed step marks its status chip red in the gallery; re-running the same command retries it safely.
+- A step failed after the character was created? Do NOT re-run `character-gen create` — the identifier is now taken and you'd get "already exists". Retry just the failed step: `character-gen sheet <identifier>` or `character-gen turnaround <identifier>`.
+- "already exists" on create itself → the identifier was taken before this run; pick a new one (suffix `-2`) and retry.
+- A failed step marks its status chip red in the gallery; re-running that step's command retries it safely.

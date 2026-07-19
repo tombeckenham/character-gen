@@ -11,7 +11,7 @@ import type { FetchImpl } from "../fal.ts";
 import { TURNAROUND_ANGLES } from "../types.ts";
 import { findMasterUrl, makeFalAngleGenerator, runTurnaround } from "./turnaround.ts";
 import type { AngleGenerator, AngleGenInput } from "./turnaround.ts";
-import type { GeneratedImage } from "./common.ts";
+import type { GeneratedAsset } from "./common.ts";
 
 const MASTER_URL = "https://fal.media/master.png";
 
@@ -23,7 +23,7 @@ function fakeGenerator(options: { failIndex?: number } = {}): {
 } {
   const calls: AngleGenInput[] = [];
   const generator: AngleGenerator = {
-    angle(input, onProgress): Promise<GeneratedImage> {
+    angle(input, onProgress): Promise<GeneratedAsset> {
       const index = calls.length;
       calls.push(input);
       if (options.failIndex === index) {
@@ -169,6 +169,137 @@ test("runTurnaround reports each stored frame through onFrame as it lands", asyn
     });
 
     assert.deepEqual(seen, ["angle_0", "angle_45", "angle_90"]);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runTurnaround survives a throwing onFrame sink: all frames land, warning reported", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const { generator } = fakeGenerator();
+    const messages: string[] = [];
+
+    const outcome = await runTurnaround(character, {
+      db,
+      generator,
+      mediaDir,
+      fetchImpl: fakeFetch(),
+      angles: [0, 45, 90],
+      onProgress: (m) => messages.push(m),
+      onFrame: () => Promise.reject(new Error("sink boom")),
+    });
+
+    assert.equal(outcome.frames.length, 3);
+    const refreshed = await db.getCharacter(character.id);
+    assert.equal(refreshed?.status.turnaround, "done");
+    assert.equal(messages.filter((m) => /frame notification failed: sink boom/u.test(m)).length, 3);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runTurnaround generates a caller-supplied angle list in its given order", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const { generator, calls } = fakeGenerator();
+    const outcome = await runTurnaround(character, {
+      db,
+      generator,
+      mediaDir,
+      fetchImpl: fakeFetch(),
+      angles: [180, 0, 90],
+    });
+    assert.deepEqual(
+      calls.map((c) => c.horizontalAngle),
+      [180, 0, 90],
+    );
+    assert.deepEqual(
+      outcome.frames.map((f) => f.kind),
+      ["angle_180", "angle_0", "angle_90"],
+    );
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failing error-status write is warned about and the work error still surfaces", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    // The status DB dies exactly when the step tries to record its failure.
+    const flakyDb: Database = {
+      ...db,
+      setStepState: (id, step, state) =>
+        state === "error"
+          ? Promise.reject(new Error("status db down"))
+          : db.setStepState(id, step, state),
+    };
+    const { generator } = fakeGenerator({ failIndex: 0 });
+    const messages: string[] = [];
+
+    await assert.rejects(
+      () =>
+        runTurnaround(character, {
+          db: flakyDb,
+          generator,
+          mediaDir,
+          fetchImpl: fakeFetch(),
+          angles: [0],
+          onProgress: (m) => messages.push(m),
+        }),
+      /angle 0 boom/u,
+    );
+
+    assert.ok(messages.some((m) => /could not mark turnaround failed: status db down/u.test(m)));
+    // The error write never landed, so the step is still marked running.
+    const refreshed = await db.getCharacter(character.id);
+    assert.equal(refreshed?.status.turnaround, "running");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failing done-status write surfaces as the step error with frames intact", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const flakyDb: Database = {
+      ...db,
+      setStepState: (id, step, state) =>
+        state === "done"
+          ? Promise.reject(new Error("done write down"))
+          : db.setStepState(id, step, state),
+    };
+    const { generator } = fakeGenerator();
+
+    await assert.rejects(
+      () =>
+        runTurnaround(character, {
+          db: flakyDb,
+          generator,
+          mediaDir,
+          fetchImpl: fakeFetch(),
+          angles: [0, 45],
+        }),
+      /done write down/u,
+    );
+
+    // The work itself succeeded — frames and request_ids are all recorded —
+    // but the step reads as error because its completion could not be saved.
+    const refreshed = await db.getCharacter(character.id);
+    assert.equal(refreshed?.status.turnaround, "error");
+    const stored = await db.getAssets(character.id);
+    assert.deepEqual(
+      stored.filter((a) => a.kind.startsWith("angle_")).map((a) => a.falRequestId),
+      ["req-angle-0", "req-angle-45"],
+    );
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

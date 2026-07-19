@@ -104,9 +104,10 @@ export interface Database {
   listCharacters(): Promise<CharacterRecord[]>;
   updateCharacter(id: string, patch: CharacterPatch): Promise<CharacterRecord | null>;
   /**
-   * Sets a single pipeline step's state, reading the row's current status fresh
-   * so a stale in-memory snapshot can't clobber sibling steps. Throws if the
-   * character no longer exists (a vanished row is a bug, never a silent no-op).
+   * Sets a single pipeline step's state in one atomic UPDATE (SQLite json_set),
+   * so concurrent writers — even separate CLI processes — can never lose each
+   * other's sibling-step writes. Throws if the character no longer exists (a
+   * vanished row is a bug, never a silent no-op).
    */
   setStepState(id: string, step: PipelineStep, state: StepState): Promise<CharacterRecord>;
   insertAsset(input: NewAsset): Promise<AssetRecord>;
@@ -200,19 +201,20 @@ export function openDatabase(dbFile: string): Database {
     },
 
     async setStepState(id, step, state) {
-      const rows = await db.select().from(characters).where(eq(characters.id, id)).limit(1);
+      // json_set patches the one key inside the stored blob in a single
+      // statement — no read-modify-write window for another process to clobber.
+      // `step` is a compile-time PipelineStep union, never user input.
+      const rows = await db
+        .update(characters)
+        .set({
+          status: sql`json_set(${characters.status}, ${`$.${step}`}, ${state})`,
+          updatedAt: Date.now(),
+        })
+        .where(eq(characters.id, id))
+        .returning();
       const row = rows[0];
       if (!row) throw new Error(`setStepState: character ${id} not found`);
-      const status = normalizeStatus(JSON.parse(row.status));
-      status[step] = state;
-      await db
-        .update(characters)
-        .set({ status: JSON.stringify(status), updatedAt: Date.now() })
-        .where(eq(characters.id, id));
-      const updated = await db.select().from(characters).where(eq(characters.id, id)).limit(1);
-      const updatedRow = updated[0];
-      if (!updatedRow) throw new Error(`setStepState: character ${id} vanished mid-update`);
-      return rowToCharacter(updatedRow);
+      return rowToCharacter(row);
     },
 
     async insertAsset(input) {

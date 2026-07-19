@@ -129,11 +129,25 @@ function toGalleryCharacter(character: CharacterRecord, assets: GalleryAssetEntr
   return entry;
 }
 
+/** Writes `data.js` via a same-directory temp file + rename (atomic on the same
+ * filesystem), so the polling page never sees a torn file. */
+function writeDataFile(galleryDir: string, payload: GalleryData): string {
+  const dataFile = join(galleryDir, "data.js");
+  const tmpFile = join(galleryDir, `.data.js.${process.pid}.tmp`);
+  try {
+    writeFileSync(tmpFile, `window.${DATA_GLOBAL} = ${JSON.stringify(payload)};\n`);
+    renameSync(tmpFile, dataFile);
+  } catch (error) {
+    rmSync(tmpFile, { force: true });
+    throw error;
+  }
+  return dataFile;
+}
+
 /**
  * Writes the complete gallery: the built SPA as `index.html`, every character's
- * local media copied under `media/<identifier>/`, and finally `data.js` — written
- * to a temp file and renamed into place so the polling page never sees a torn
- * file. When the built SPA is missing, an already-present `index.html` is kept
+ * local media copied under `media/<identifier>/`, and finally `data.js` (see
+ * writeDataFile). When the built SPA is missing, an already-present `index.html` is kept
  * (a refresh mid-pipeline must not depend on dist/); with neither, this throws
  * GALLERY_NOT_BUILT.
  */
@@ -170,16 +184,7 @@ export async function writeGallery(deps: GalleryWriteDeps): Promise<GalleryWrite
     version: await deps.db.bumpCounter(GALLERY_VERSION_KEY),
     characters,
   };
-  const dataFile = join(galleryDir, "data.js");
-  // Same-directory temp file so the rename is atomic on the same filesystem.
-  const tmpFile = join(galleryDir, `.data.js.${process.pid}.tmp`);
-  try {
-    writeFileSync(tmpFile, `window.${DATA_GLOBAL} = ${JSON.stringify(payload)};\n`);
-    renameSync(tmpFile, dataFile);
-  } catch (error) {
-    rmSync(tmpFile, { force: true });
-    throw error;
-  }
+  const dataFile = writeDataFile(galleryDir, payload);
 
   return {
     galleryDir,

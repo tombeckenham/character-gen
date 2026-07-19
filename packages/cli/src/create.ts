@@ -14,9 +14,11 @@ import {
   validateProfile,
 } from "@character-gen/engine";
 import type {
+  AngleGenerator,
   CharacterProfile,
   CharacterRecord,
   Database,
+  ImageGenerator,
   PipelineStep,
 } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
@@ -98,10 +100,33 @@ async function resolveProfile(
   return { profile: await deriveMinimalProfile(db, description) };
 }
 
+export interface CreateDeps {
+  env?: NodeJS.ProcessEnv;
+  /** Override the fal-backed generators (tests run offline). */
+  imageGenerator?: ImageGenerator;
+  angleGenerator?: AngleGenerator;
+}
+
+/** Both step generators, from the overrides or a single resolved fal client
+ * (only resolved when an override is missing), or a key error to print. */
+function resolveGenerators(
+  deps: CreateDeps,
+): { imageGenerator: ImageGenerator; angleGenerator: AngleGenerator } | { error: string } {
+  if (deps.imageGenerator && deps.angleGenerator) {
+    return { imageGenerator: deps.imageGenerator, angleGenerator: deps.angleGenerator };
+  }
+  const client = resolveClient();
+  if ("error" in client) return client;
+  return {
+    imageGenerator: deps.imageGenerator ?? makeFalImageGenerator(client.client),
+    angleGenerator: deps.angleGenerator ?? makeFalAngleGenerator(client.client),
+  };
+}
+
 // Argument parsing, profile resolution, create, and the optional media steps form
 // one linear command; the sub-steps are already extracted into helpers above.
 // oxlint-disable-next-line max-lines-per-function
-export async function cmdCreate(rest: string[]): Promise<number> {
+export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<number> {
   if (wantsHelp(rest)) {
     out(COMMAND_HELP["create"] ?? "");
     return 0;
@@ -131,7 +156,7 @@ export async function cmdCreate(rest: string[]): Promise<number> {
   const runSheetStep = parsedSteps.steps.includes("sheet");
   const runTurnaroundStep = parsedSteps.steps.includes("turnaround");
 
-  const paths = statePaths();
+  const paths = statePaths(deps.env ?? process.env);
   ensureStateDirs(paths, ["root", "mediaDir"]);
   const db = openDatabase(paths.dbFile);
   try {
@@ -152,28 +177,19 @@ export async function cmdCreate(rest: string[]): Promise<number> {
     await refreshGallery(db, paths);
 
     if (runSheetStep || runTurnaroundStep) {
-      const client = resolveClient();
-      if ("error" in client) {
-        err(client.error);
+      const generators = resolveGenerators(deps);
+      if ("error" in generators) {
+        err(generators.error);
         return 1;
       }
       if (runSheetStep) {
-        const ok = await runSheetAndReport(
-          db,
-          character,
-          makeFalImageGenerator(client.client),
-          paths,
-        );
-        // A failed sheet leaves nothing for the turnaround to shoot from.
+        const ok = await runSheetAndReport(db, character, generators.imageGenerator, paths);
+        // A failed sheet leaves nothing for the turnaround to shoot from —
+        // never bill 8 angle generations off a stale (or absent) master.
         if (!ok) return 1;
       }
       if (runTurnaroundStep) {
-        const ok = await runTurnaroundAndReport(
-          db,
-          character,
-          makeFalAngleGenerator(client.client),
-          paths,
-        );
+        const ok = await runTurnaroundAndReport(db, character, generators.angleGenerator, paths);
         if (!ok) return 1;
       }
     }

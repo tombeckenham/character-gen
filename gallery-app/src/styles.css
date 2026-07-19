@@ -248,6 +248,11 @@ body {
   border-color: var(--accent);
 }
 
+.spinner-stage:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .spinner-frame {
   display: none;
   width: 100%;
