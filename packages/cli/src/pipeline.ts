@@ -4,12 +4,16 @@ import {
   ensureStateDirs,
   makeFalAngleGenerator,
   makeFalClient,
+  makeFalVoiceGenerator,
   openDatabase,
   refreshGalleryIfPresent,
   resolveFalKey,
   runSheet,
   runSheetPasses,
+  runSpeak,
   runTurnaround,
+  runVoice,
+  SPEECH_EMOTIONS,
   statePaths,
 } from "@character-gen/engine";
 import type {
@@ -19,10 +23,24 @@ import type {
   FalClient,
   ImageGenerator,
   SheetPass,
+  SpeechEmotion,
   StatePaths,
+  VoiceGenerator,
 } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
+
+/** Uses the injected generator (tests), else builds a fal-backed one from the
+ * resolved key — or an error message to print. */
+function resolveGenerator<G>(
+  override: G | undefined,
+  make: (client: FalClient) => G,
+): { generator: G } | { error: string } {
+  if (override) return { generator: override };
+  const client = resolveClient();
+  if ("error" in client) return client;
+  return { generator: make(client.client) };
+}
 
 /** Resolves a fal client from the ambient key, or an error message to print. */
 export function resolveClient(): { client: FalClient } | { error: string } {
@@ -159,8 +177,28 @@ export function runTurnaroundAndReport(
   });
 }
 
+export function runVoiceAndReport(
+  db: Database,
+  character: CharacterRecord,
+  generator: VoiceGenerator,
+  paths: StatePaths,
+): Promise<boolean> {
+  return reportStep(db, paths, "Voice", async () => {
+    const outcome = await runVoice(character, {
+      db,
+      generator,
+      mediaDir: paths.mediaDir,
+      onProgress: progressWithLiveStart(db, paths),
+    });
+    return [
+      `Voice designed for ${character.identifier} (custom voice ${outcome.customVoiceId}).`,
+      assetLine(outcome.sample),
+    ];
+  });
+}
+
 interface StepCmdSpec<G> {
-  name: "turnaround";
+  name: "turnaround" | "voice";
   makeGenerator: (client: FalClient) => G;
   runAndReport: (
     db: Database,
@@ -196,16 +234,12 @@ async function cmdStep<G>(
       err(`No character found matching "${target}".`);
       return 1;
     }
-    let generator = deps.generator;
-    if (!generator) {
-      const client = resolveClient();
-      if ("error" in client) {
-        err(client.error);
-        return 1;
-      }
-      generator = spec.makeGenerator(client.client);
+    const resolved = resolveGenerator(deps.generator, spec.makeGenerator);
+    if ("error" in resolved) {
+      err(resolved.error);
+      return 1;
     }
-    return (await spec.runAndReport(db, character, generator, paths)) ? 0 : 1;
+    return (await spec.runAndReport(db, character, resolved.generator, paths)) ? 0 : 1;
   } finally {
     db.close();
   }
@@ -223,4 +257,83 @@ export function cmdTurnaround(rest: string[], deps: TurnaroundDeps = {}): Promis
     makeGenerator: makeFalAngleGenerator,
     runAndReport: runTurnaroundAndReport,
   });
+}
+
+export interface VoiceDeps {
+  env?: NodeJS.ProcessEnv;
+  /** Override the fal-backed voice generator (tests run offline). */
+  generator?: VoiceGenerator;
+}
+
+export function cmdVoice(rest: string[], deps: VoiceDeps = {}): Promise<number> {
+  return cmdStep(rest, deps, {
+    name: "voice",
+    makeGenerator: makeFalVoiceGenerator,
+    runAndReport: runVoiceAndReport,
+  });
+}
+
+export interface SpeakDeps {
+  env?: NodeJS.ProcessEnv;
+  /** Override the fal-backed voice generator (tests run offline). */
+  generator?: VoiceGenerator;
+}
+
+/** `speak <char> "<line>" [--emotion <e>]`: unlike the single-step commands it
+ * takes a second positional (the line) and is not a tracked pipeline step, so it
+ * has its own shape rather than going through cmdStep. */
+// One linear command: arg parse, char + generator resolution, run + report.
+// oxlint-disable-next-line max-lines-per-function
+export async function cmdSpeak(rest: string[], deps: SpeakDeps = {}): Promise<number> {
+  if (wantsHelp(rest)) {
+    out(COMMAND_HELP["speak"] ?? "");
+    return 0;
+  }
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { emotion: { type: "string" } },
+  });
+  const target = positionals[0];
+  const line = positionals[1];
+  if (!target || !line) {
+    err('Usage: character-gen speak <id|identifier> "<line>" [--emotion <emotion>]');
+    return 1;
+  }
+  const emotion = values["emotion"];
+  if (emotion !== undefined && !(SPEECH_EMOTIONS as readonly string[]).includes(emotion)) {
+    err(`Unknown --emotion "${emotion}". Choose one of: ${SPEECH_EMOTIONS.join(", ")}.`);
+    return 1;
+  }
+
+  const paths = statePaths(deps.env ?? process.env);
+  ensureStateDirs(paths, ["root", "mediaDir"]);
+  const db = openDatabase(paths.dbFile);
+  try {
+    const character = await db.getCharacter(target);
+    if (!character) {
+      err(`No character found matching "${target}".`);
+      return 1;
+    }
+    const resolved = resolveGenerator(deps.generator, makeFalVoiceGenerator);
+    if ("error" in resolved) {
+      err(resolved.error);
+      return 1;
+    }
+    const { generator } = resolved;
+    const ok = await reportStep(db, paths, "Speak", async () => {
+      const outcome = await runSpeak(character, {
+        db,
+        generator,
+        mediaDir: paths.mediaDir,
+        onProgress: progressWithLiveStart(db, paths),
+        line,
+        ...(emotion ? { emotion: emotion as SpeechEmotion } : {}),
+      });
+      return [`${character.name} said: “${line}”`, assetLine(outcome.speech)];
+    });
+    return ok ? 0 : 1;
+  } finally {
+    db.close();
+  }
 }

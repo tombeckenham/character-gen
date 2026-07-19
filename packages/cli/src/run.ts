@@ -11,13 +11,13 @@ import {
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 import { cmdCreate } from "./create.ts";
-import { cmdTurnaround } from "./pipeline.ts";
+import { cmdSpeak, cmdTurnaround, cmdVoice } from "./pipeline.ts";
 import { cmdSheet } from "./sheet-cmd.ts";
 import { cmdOpen } from "./open.ts";
 
 /** Pipeline commands that are recognized but not built yet. Exported so the
  * skills drift test can assert no skill directs Claude at a stub. */
-export const STUBS: ReadonlySet<string> = new Set(["voice", "speak", "publish", "extract"]);
+export const STUBS: ReadonlySet<string> = new Set(["publish", "extract"]);
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */
@@ -182,6 +182,10 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdSheet(rest);
     case "turnaround":
       return cmdTurnaround(rest);
+    case "voice":
+      return cmdVoice(rest);
+    case "speak":
+      return cmdSpeak(rest);
     case "list":
       return cmdList(rest);
     case "show":

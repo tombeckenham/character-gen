@@ -50,6 +50,17 @@ export function extractImageUrl(data: unknown): string {
   throw new Error("fal image response contained no image URL");
 }
 
+/** Pulls the `audio.url` out of a fal audio response (voice-design, speech), or
+ * throws. Both endpoints return a single `audio` File, not an array. */
+export function extractAudioUrl(data: unknown): string {
+  const audio = (data as { audio?: unknown }).audio;
+  if (audio !== null && typeof audio === "object") {
+    const url = (audio as { url?: unknown }).url;
+    if (typeof url === "string" && url.length > 0) return url;
+  }
+  throw new Error("fal audio response contained no audio URL");
+}
+
 /**
  * Wraps a step's progress sink: the fal queue fires an update on every poll, so
  * consecutive identical messages collapse and progress reads as one line per
