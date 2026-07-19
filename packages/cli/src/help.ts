@@ -9,7 +9,7 @@ Commands:
   list                     List all characters
   show <id|identifier>     Print a character's profile and assets
   sheet <char>             (Re)generate master sheet + expressions
-  turnaround <char>        Generate the 8-angle spin frames
+  turnaround <char>        Generate the 12-angle spin frames
   voice <char>             Design the character's signature voice            (coming soon)
   speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
   extract <script-file>    Emit cast JSON from a script                      (coming soon)
@@ -25,7 +25,7 @@ export const COMMAND_HELP: Record<string, string> = {
   create: `character-gen create "<description>" [--profile-json <file>] [--steps <list>] [--tier core|rich|full]
   Invent a profile (or take one via --profile-json) and run the pipeline.
   Steps available now: profile, sheet, turnaround — all three run by default
-  (the 8-frame turnaround adds 8 generations; skip it with --steps profile,sheet).
+  (the 12-frame turnaround adds 12 generations; skip it with --steps profile,sheet).
   Creating the character (the profile step) always happens first, so --steps
   sheet still creates it, then generates the sheet. --surprise is designed for
   the create-character skill; for now pass --profile-json directly.
@@ -48,7 +48,7 @@ export const COMMAND_HELP: Record<string, string> = {
   are mutually exclusive. Passes stop at the first failure; nothing generates
   past a failed pass.`,
   turnaround: `character-gen turnaround <char>
-  Generate 8 turnaround views at 45° increments from the master image.
+  Generate 12 turnaround views at 30° increments from the master image.
   Requires a completed sheet (run character-gen sheet first). The gallery
   detail page renders the frames as a drag-to-scrub spinner.`,
   voice: `character-gen voice <char>

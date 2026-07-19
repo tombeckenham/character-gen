@@ -362,7 +362,7 @@ test("turnaround on an existing character with no key exits 1 with a setup hint"
 test("root help lists turnaround as available (not coming soon)", () => {
   const res = runCli(["--help"]);
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /turnaround <char>\s+Generate the 8-angle spin frames\n/u);
+  assert.match(res.stdout, /turnaround <char>\s+Generate the 12-angle spin frames\n/u);
 });
 
 /** Seeds a minimal already-opened gallery so refresh/open work without dist. */

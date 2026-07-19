@@ -23,7 +23,7 @@ Run the interview through the **AskUserQuestion tool** so every question appears
 **Call 2 — the rules and the budget (2 questions):**
 
 5. header `Never` — "They would never…" (seeds `negativeCanon`)
-6. header `Tier` — how much to generate, costs stated plainly in the descriptions (the 8-frame turnaround runs by default on top of every tier — mention it adds 8 generations, skippable):
+6. header `Tier` — how much to generate, costs stated plainly in the descriptions (the 12-frame turnaround runs by default on top of every tier — mention it adds 12 generations, skippable):
    - `core` — master + expression grid + outfit (3 sheet generations; the safe start)
    - `rich` — core + face triptych + 4 named expressions + 2 detail macros (12 sheet generations)
    - `full` — rich + full-body scale shot + up to 4 detail macros (15 sheet generations)
@@ -74,7 +74,7 @@ Note in the tier descriptions that passes can be added later (`character-gen she
 Rules:
 
 - `identifier`: lowercase slug — letters, digits, hyphens only, max 64 chars (e.g. `isolde-marrow`). Must be unique; suffix `-2` if taken.
-- `visualCanon` is the **locked physical description** reused verbatim in every image prompt — it is what keeps the sheet, expressions, and all 8 turnaround frames the same person. Make it concrete and specific.
+- `visualCanon` is the **locked physical description** reused verbatim in every image prompt — it is what keeps the sheet, expressions, and all 12 turnaround frames the same person. Make it concrete and specific.
 - **Imperfections are identity anchors.** Models keep a chipped tooth or a mended seam consistent far more reliably than "brown hair, 60s" — give every character at least one imperfection with a story. Each one is injected into every image prompt and gets its own macro shot in the `details` pass.
 - `expressions` names the character's OWN emotional range ("weathered joy", not "happy") — one image each in the rich/full tiers; defaults to joy/anger/fear/exhaustion when absent.
 - `negativeCanon` is appended to every prompt as hard rules ("never …").
@@ -112,7 +112,7 @@ Write the JSON to a temp file, then:
 character-gen create --profile-json /tmp/<identifier>.json --tier rich
 ```
 
-By default this runs the whole visual pipeline: profile + sheet at the chosen tier + the 8-frame turnaround (8 generations on top of the tier — a character isn't done until you can spin them). If the user wants to skip the spin, pass the steps explicitly:
+By default this runs the whole visual pipeline: profile + sheet at the chosen tier + the 12-frame turnaround (12 generations on top of the tier — a character isn't done until you can spin them). If the user wants to skip the spin, pass the steps explicitly:
 
 ```sh
 character-gen create --profile-json /tmp/<identifier>.json --tier rich --steps profile,sheet

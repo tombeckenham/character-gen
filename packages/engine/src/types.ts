@@ -2,12 +2,22 @@
 // No enums/namespaces — erasableSyntaxOnly rejects them; string unions + `as
 // const` arrays instead.
 
-export const TURNAROUND_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+/** The angles the turnaround step generates: a 12-frame ring at 30°. */
+export const TURNAROUND_ANGLES = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] as const;
 
-export type TurnaroundAngle = (typeof TURNAROUND_ANGLES)[number];
+/** Angles from the earlier 8-frame (45°) era: no longer generated, but stored
+ * assets keep these kinds, so they stay recognized for display. */
+export const LEGACY_TURNAROUND_ANGLES = [45, 135, 225, 315] as const;
 
-/** Asset kinds for the 8 turnaround frames, e.g. `angle_45`. */
+export type TurnaroundAngle =
+  | (typeof TURNAROUND_ANGLES)[number]
+  | (typeof LEGACY_TURNAROUND_ANGLES)[number];
+
+/** Asset kinds for turnaround frames, e.g. `angle_30` (or a legacy `angle_45`). */
 export type AngleKind = `angle_${TurnaroundAngle}`;
+
+/** Every angle whose `angle_*` kind is recognized, current era and legacy. */
+const KNOWN_ANGLES = [...TURNAROUND_ANGLES, ...LEGACY_TURNAROUND_ANGLES] as const;
 
 /** The three dedicated face views, in display (triptych) order. */
 export const FACE_KINDS = ["face_front", "face_three_quarter", "face_profile"] as const;
@@ -22,7 +32,7 @@ export const ASSET_KINDS = [
   ...FACE_KINDS,
   "detail",
   "scale",
-  ...TURNAROUND_ANGLES.map((angle) => `angle_${angle}` as const),
+  ...KNOWN_ANGLES.map((angle) => `angle_${angle}` as const),
   "voice_sample",
   "speech",
 ] as const;
@@ -34,14 +44,13 @@ export function angleKind(angle: TurnaroundAngle): AngleKind {
   return `angle_${angle}`;
 }
 
-/** The turnaround angle encoded in an `angle_*` kind, or null if it isn't one. */
+/** The turnaround angle encoded in an `angle_*` kind (current or legacy era),
+ * or null if it isn't one. */
 export function angleFromKind(kind: string): TurnaroundAngle | null {
   const match = /^angle_(\d+)$/u.exec(kind);
   if (!match) return null;
   const angle = Number(match[1]);
-  return (TURNAROUND_ANGLES as readonly number[]).includes(angle)
-    ? (angle as TurnaroundAngle)
-    : null;
+  return (KNOWN_ANGLES as readonly number[]).includes(angle) ? (angle as TurnaroundAngle) : null;
 }
 
 /**
@@ -97,7 +106,7 @@ export const IMPLEMENTED_STEPS = [
 export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];
 
 /**
- * What `create` runs when `--steps` is omitted. The turnaround (8 generations)
+ * What `create` runs when `--steps` is omitted. The turnaround (12 generations)
  * is part of the default experience — a character isn't done until you can
  * spin them; skip it with an explicit `--steps profile,sheet`.
  */
