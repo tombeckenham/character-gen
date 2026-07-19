@@ -15,6 +15,7 @@ import {
   runVoice,
   SPEECH_EMOTIONS,
   statePaths,
+  VOICE_MODELS,
 } from "@character-gen/engine";
 import type {
   AngleGenerator,
@@ -192,10 +193,10 @@ export function runVoiceAndReport(
       generator,
       onProgress: progressWithLiveStart(store, paths),
     });
-    return [
-      `Voice designed for ${character.identifier} (custom voice ${outcome.customVoiceId}).`,
-      assetLine(outcome.sample),
-    ];
+    const summary = outcome.designed
+      ? `Voice designed for ${character.identifier} via ${outcome.model} (custom voice ${outcome.voiceRef}).`
+      : `Voice set for ${character.identifier}: ${outcome.model} preset "${outcome.voiceRef}".`;
+    return [summary, assetLine(outcome.sample)];
   });
 }
 
@@ -273,6 +274,38 @@ export function cmdVoice(rest: string[], deps: VoiceDeps = {}): Promise<number> 
     makeGenerator: makeFalVoiceGenerator,
     runAndReport: runVoiceAndReport,
   });
+}
+
+/**
+ * `voices`: list the available TTS models and their preset voices, so an author
+ * knows what to put in a profile's `voice` block. Pure local lookup — no key,
+ * no network.
+ */
+export function cmdVoices(rest: string[]): number {
+  if (wantsHelp(rest)) {
+    out(COMMAND_HELP["voices"] ?? "");
+    return 0;
+  }
+  const modelBlocks = Object.values(VOICE_MODELS).flatMap((model) => {
+    const presetLabel = model.presetsClosed ? "presets (the full set)" : "presets (a sample)";
+    return [
+      `  ${model.key} — ${model.label}`,
+      `    ${model.description}`,
+      `    design: ${model.designEndpoint ? "yes" : "no (preset only)"}`,
+      `    ${presetLabel}: ${model.presets.join(", ")}`,
+      `    default preset: ${model.defaultPreset}`,
+      "",
+    ];
+  });
+  out(
+    [
+      'Voice models (set in a profile\'s "voice": { "model", "preset" }):',
+      "",
+      ...modelBlocks,
+      `Emotions (--emotion on speak): ${SPEECH_EMOTIONS.join(", ")}.`,
+    ].join("\n"),
+  );
+  return 0;
 }
 
 export interface SpeakDeps {

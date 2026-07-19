@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "@character-gen/engine";
 import type { CharacterStore, VoiceGenerator } from "@character-gen/engine";
-import { cmdSpeak, cmdVoice } from "./pipeline.ts";
+import { cmdSpeak, cmdVoice, cmdVoices } from "./pipeline.ts";
 
 const MP3 = "data:audio/mpeg;base64,SUQz";
 
@@ -55,6 +55,42 @@ test("voice then speak records a voice_sample and a speech asset through the CLI
   }
 });
 
+test("a preset profile lets speak run without a prior voice design", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-voice-cli-"));
+  try {
+    const store: CharacterStore = openStore(join(dir, "characters"));
+    await store.insertCharacter({
+      identifier: "ada-preset",
+      name: "Ada",
+      profile: {
+        name: "Ada",
+        identifier: "ada-preset",
+        voice: { model: "elevenlabs", preset: "Bella" },
+      },
+    });
+    store.close();
+
+    const env = { CHARACTER_GEN_HOME: dir } as NodeJS.ProcessEnv;
+    // No cmdVoice run first — the preset stands in for a designed voice.
+    assert.equal(await cmdSpeak(["ada-preset", "Hello."], { env, generator: okGenerator }), 0);
+
+    const check = openStore(join(dir, "characters"));
+    try {
+      const character = await check.getCharacter("ada-preset");
+      const assets = await check.getAssets(character?.id ?? "");
+      assert.equal(assets.filter((a) => a.kind === "speech").length, 1);
+    } finally {
+      check.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("voices lists the models and their presets without a key", () => {
+  assert.equal(cmdVoices([]), 0);
+});
+
 test("speak before voice exits 1 pointing at the voice command", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-voice-cli-"));
   try {
@@ -76,9 +112,9 @@ test("speak rejects an unknown --emotion before any synthesis", async () => {
     let spoke = false;
     const spyGenerator: VoiceGenerator = {
       design: okGenerator.design,
-      speak: (input, onProgress) => {
+      speak: (model, input, onProgress) => {
         spoke = true;
-        return okGenerator.speak(input, onProgress);
+        return okGenerator.speak(model, input, onProgress);
       },
     };
     const code = await cmdSpeak(["isolde-keeper", "Hi", "--emotion", "smug"], {

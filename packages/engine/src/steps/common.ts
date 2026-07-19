@@ -11,9 +11,10 @@ import type { CharacterStore } from "../store/index.ts";
  * PNG fetch legitimately takes longer. */
 export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
-/** Default number of image generations kept in flight within one step. Bounded
- * so a step fans out to fal quickly without tripping rate limits. */
-export const DEFAULT_GEN_CONCURRENCY = 4;
+/** Default number of image generations kept in flight within one step. fal
+ * handles queuing/rate-limiting server-side, so a whole step (e.g. all 12
+ * turnaround angles) fans out at once rather than trickling. */
+export const DEFAULT_GEN_CONCURRENCY = 40;
 
 /** A worker rejection, tagged with the input index that produced it. */
 export interface PoolFailure {

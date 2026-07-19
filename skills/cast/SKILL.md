@@ -26,8 +26,9 @@ node packages/cli/src/index.ts <command> [args]
 | `character-gen show <id\|identifier>`                                                                     | Print a character's full profile JSON and assets (including fal request ids).                                                                                                                                                                                                                                                                                                         |
 | `character-gen sheet <char> [--tier core\|rich\|full] [--passes <list>]`                                  | (Re)generate the master reference image + expression/outfit variants. `--tier` also runs that tier's extra passes; `--passes face,expressions,details,scale` reruns just those passes off the existing master (the two flags are mutually exclusive).                                                                                                                                 |
 | `character-gen turnaround <char>`                                                                         | Generate the 12-angle spin frames from the master (requires a completed sheet).                                                                                                                                                                                                                                                                                                       |
-| `character-gen voice <char>`                                                                              | Design the character's signature voice from its `voiceDescription` (a reusable custom voice + a preview clip). Run once before `speak`.                                                                                                                                                                                                                                               |
-| `character-gen speak <char> "<line>" [--emotion <e>]`                                                     | Voice a line in the character's designed voice (run `voice` first). `--emotion` ∈ happy, sad, angry, fearful, disgusted, surprised, neutral. Each call adds a clip; earlier lines are kept.                                                                                                                                                                                           |
+| `character-gen voice <char>`                                                                              | Establish the character's voice per its profile `voice` block: design a bespoke voice from `voiceDescription` (minimax), or preview a named stock `preset`. Either way stores a preview clip. Run once before `speak`.                                                                                                                                                                |
+| `character-gen voices`                                                                                    | List the TTS models and their preset voices — the values that go in a profile's `voice` block. Pure local lookup; no key needed.                                                                                                                                                                                                                                                      |
+| `character-gen speak <char> "<line>" [--emotion <e>]`                                                     | Voice a line in the character's voice (its preset, else a designed voice). `--emotion` ∈ happy, sad, angry, fearful, disgusted, surprised, neutral (applied where the model supports it). Each call adds a clip; earlier lines are kept.                                                                                                                                              |
 | `character-gen publish <char>`                                                                            | Create/update the character on fal Assets Characters (shells out to the genmedia CLI, which must be on PATH). Sends up to 20 prioritized image request_ids as references + the master as cover; re-publishing updates the existing fal character in place.                                                                                                                            |
 | `character-gen extract <script-file>`                                                                     | Print a script file's text. YOU do the cast extraction (read the output, identify characters, author a profile each).                                                                                                                                                                                                                                                                 |
 | `character-gen open [--no-browser]`                                                                       | Write the gallery and open its `file://` URL. The page live-refreshes every 2s while other commands run.                                                                                                                                                                                                                                                                              |
@@ -111,7 +112,12 @@ Rules:
 - **Imperfections are identity anchors.** Models keep a chipped tooth or a mended seam consistent far more reliably than "brown hair, 60s" — give every character at least one imperfection with a story. Each one is injected into every image prompt and gets its own macro shot in the `details` pass.
 - `expressions` names the character's OWN emotional range ("weathered joy", not "happy") — one image each in the rich/full tiers; defaults to joy/anger/fear/exhaustion when absent.
 - `negativeCanon` is appended to every prompt as hard rules ("never …").
-- `voiceDescription` drives voice design (`character-gen voice`): write it vividly — timbre, accent, pace, attitude — so the signature voice is distinctive.
+- `voiceDescription` drives bespoke voice design (`character-gen voice` on the default minimax model): write it vividly — timbre, accent, pace, attitude — so the designed voice is distinctive.
+- `voice` (optional) chooses **how** the voice is produced — a `{ "model", "preset" }` block:
+  - Omit it for the default: minimax **designs a bespoke voice** from `voiceDescription`.
+  - Set `"preset"` to use a named **stock voice** instead of designing (skips design; `speak` uses the preset directly). Works on any model.
+  - Set `"model"` to pick the TTS engine. `minimax` designs or presets; `elevenlabs` and `seed-speech` are **preset-only** (no design — they need a `preset`, else they fall back to the model default).
+  - Run `character-gen voices` to see every model and its preset names before authoring this — don't guess preset strings (`seed-speech`'s set is closed and validated). Example: `"voice": { "model": "seed-speech", "preset": "tim_en" }` or `"voice": { "model": "elevenlabs", "preset": "Rachel" }`.
 - All the structured fields are optional — a core-tier character with just `visualCanon` is still valid.
 
 **Show the drafted profile to the user for a yes/tweak BEFORE running the CLI** — generations cost money; the profile is free to edit.
@@ -174,20 +180,21 @@ Generates 12 views at 30° increments (0° front → 330°), shot from the maste
 1. Identify the character (`character-gen list` if unsure of the identifier).
 2. Check readiness: the turnaround needs a completed sheet. `character-gen show <identifier>` — look for a `master` asset. If missing, run `character-gen sheet <identifier>` first.
 3. Open the gallery (`character-gen open`) so the user watches the 12 frames arrive one by one.
-4. Generate: `character-gen turnaround <identifier>` — 12 image generations run sequentially; expect a few minutes. Progress streams per angle.
+4. Generate: `character-gen turnaround <identifier>` — all 12 angles fan out at once (fal queues them server-side); expect a couple of minutes. Progress streams per angle as each frame lands.
 5. Report how many of the 12 frames landed (a failure stops the run at that angle — say where, if early), remind them to **drag, flick, or scroll on the turnaround image to spin**, and end with the character's deep link.
 
 Re-running `character-gen turnaround` on the same character regenerates all 12 frames (e.g. after a new sheet); the spinner always shows the newest frame per angle.
 
 ## Workflow: give a character a voice
 
-Turns the profile's `voiceDescription` into a real, reusable voice, then speaks lines in it. Use when the user asks to hear a character, give them a voice, or have them say something.
+Establishes the character's voice, then speaks lines in it. Two ways to get a voice, both chosen by the profile's `voice` block (see the authoring rules above): **design** a bespoke voice from `voiceDescription` (minimax, the default), or use a named **preset** stock voice on any model (`minimax`, `elevenlabs`, `seed-speech`). Use when the user asks to hear a character, give them a voice, pick a specific voice/model, or have them say something.
 
-1. Identify the character (`character-gen list` if unsure). It needs a `voiceDescription` — `character-gen show <identifier>` to check; if it's thin, the voice is composed from archetype/personality instead, but a vivid `voiceDescription` gives a far more distinctive result.
-2. Open the gallery (`character-gen open`) so the clips appear in the **Voice** section as they land.
-3. Design the signature voice (once): `character-gen voice <identifier>`. Re-running redesigns it; `speak` always uses the newest.
-4. Speak lines in it: `character-gen speak <identifier> "The line, in their own words."` — add `--emotion angry` (etc.) to color the delivery. Write the line in the character's diction, not neutral narration; each `speak` adds another clip so you can build a short scene.
-5. Report which clips landed and end with the character's deep link. "No designed voice for …" on `speak` → run `character-gen voice <identifier>` first.
+1. Decide the voice. If the user named a model or a specific voice, run `character-gen voices` to find the exact `model`/`preset` strings, then set the profile's `voice` block (edit the profile before `create`, or `character-gen show <id>` to see what's there). No `voice` block → bespoke design from `voiceDescription`.
+2. Identify the character (`character-gen list` if unsure). For the **design** path it needs a `voiceDescription` (`character-gen show <identifier>` to check; a thin one falls back to archetype/personality, but a vivid one is far better). The **preset** path needs no description.
+3. Open the gallery (`character-gen open`) so the clips appear in the **Voice** section as they land.
+4. Establish the voice (once): `character-gen voice <identifier>`. Design mints a reusable voice; a preset just previews the chosen stock voice. Re-running redoes it; `speak` always uses the newest.
+5. Speak lines in it: `character-gen speak <identifier> "The line, in their own words."` — add `--emotion angry` (etc.) to color the delivery (applied where the model supports it). Write the line in the character's diction, not neutral narration; each `speak` adds another clip so you can build a short scene.
+6. Report which clips landed and end with the character's deep link. "No designed voice for …" on `speak` → run `character-gen voice <identifier>` first, or set a `voice.preset` in the profile.
 
 Voice can also run inside `character-gen create` via `--steps profile,sheet,voice` (it reads only the profile text, so it needs no images).
 
@@ -204,7 +211,18 @@ Run `character-gen publish <identifier>` once the character has at least a core 
 1. `character-gen extract <script-file>` prints the script text (or read the file directly).
 2. YOU identify the distinct characters worth generating — named speaking roles first; confirm the list with the user if it is longer than ~4 (each full character is real generation cost).
 3. For each character, author a full profile (same bar as the create workflow — contradiction, imperfection, signature item, visual canon) grounded in what the script actually says; invent the rest coherently.
-4. Loop `character-gen create --profile-json <file>` per character (open the gallery first so the ensemble fills in live). Batch-friendly tiers: default core; only go rich/full if the user asks.
+4. **Run every character's `create` in parallel** — open the gallery first, then launch all of them at once and wait for the batch, so the whole ensemble materializes together instead of one-at-a-time. Each character is an isolated `characters/<identifier>/` folder and the gallery's `data.js` write is atomic (pid-scoped temp + rename), so concurrent `create` processes are safe and each gallery refresh re-scans every character on disk. Kick them off as background jobs and wait:
+
+   ```sh
+   character-gen open
+   for f in /tmp/cast/*.json; do
+     character-gen create --profile-json "$f" --tier core &
+   done
+   wait
+   ```
+
+   (Distinct identifiers per file — the agent authors those, so there's no collision. Each `create` fans its own images out wide and fal queues everything server-side, so don't worry about how many requests are in flight — launch the whole cast at once.) Batch-friendly tiers: default core; only go rich/full if the user asks.
+
 5. End with the gallery link.
 
 ## Which command when
