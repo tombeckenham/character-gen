@@ -1,4 +1,3 @@
-// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -75,7 +74,6 @@ async function seedCharacter(store: CharacterStore, withMaster = true): Promise<
   return character;
 }
 
-// oxlint-disable-next-line max-lines-per-function
 test("runTurnaround generates all 12 angles from the master and records assets in order", async () => {
   const { store, dir, charactersDir } = setup();
   try {

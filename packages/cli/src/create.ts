@@ -141,7 +141,6 @@ function resolveGenerators(deps: CreateDeps): CreateGenerators | { error: string
 
 // Argument parsing, profile resolution, create, and the optional media steps form
 // one linear command; the sub-steps are already extracted into helpers above.
-// oxlint-disable-next-line max-lines-per-function
 export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<number> {
   if (wantsHelp(rest)) {
     out(COMMAND_HELP["create"] ?? "");

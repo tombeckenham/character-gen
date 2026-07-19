@@ -1,6 +1,5 @@
-// oxlint-disable require-await, max-lines -- the async method signatures are
-// the stable engine API (the folder store is synchronous filesystem work
-// underneath), and the repository is one cohesive unit.
+// oxlint-disable require-await -- the async method signatures are the stable
+// engine API; the folder store is synchronous filesystem work underneath.
 import {
   existsSync,
   mkdirSync,

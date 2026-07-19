@@ -57,7 +57,6 @@ export interface SheetDeps {
  */
 // One linear command: parse, resolve, guard, run — splitting would scatter the
 // mutually-exclusive flag handling.
-// oxlint-disable-next-line max-lines-per-function
 export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<number> {
   if (wantsHelp(rest)) {
     out(COMMAND_HELP["sheet"] ?? "");
