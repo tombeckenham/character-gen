@@ -116,6 +116,12 @@ export interface Database {
   getAssets(characterId: string): Promise<AssetRecord[]>;
   setSetting(key: string, value: string): Promise<void>;
   getSetting(key: string): Promise<string | null>;
+  /**
+   * Atomically increments the integer counter stored under `key` (creating it
+   * at 1) in a single upsert statement, so concurrent writers — even in
+   * separate processes — always mint distinct, strictly increasing values.
+   */
+  bumpCounter(key: string): Promise<number>;
   close(): void;
 }
 
@@ -255,6 +261,21 @@ export function openDatabase(dbFile: string): Database {
         .insert(settings)
         .values({ key, value })
         .onConflictDoUpdate({ target: settings.key, set: { value } });
+    },
+
+    async bumpCounter(key) {
+      const rows = await db
+        .insert(settings)
+        .values({ key, value: "1" })
+        .onConflictDoUpdate({
+          target: settings.key,
+          // A non-numeric existing value CASTs to 0, restarting the counter at 1.
+          set: { value: sql`CAST(${settings.value} AS INTEGER) + 1` },
+        })
+        .returning({ value: settings.value });
+      const row = rows[0];
+      if (!row) throw new Error(`bumpCounter: upsert for "${key}" returned no row`);
+      return Number(row.value);
     },
 
     async getSetting(key) {

@@ -9,5 +9,21 @@ export * from "./setup.ts";
 export * from "./doctor.ts";
 export * from "./character.ts";
 export * from "./steps/sheet.ts";
+export * from "./gallery.ts";
+// gallery-data re-exports types.ts names; explicit exports avoid the ambiguity
+// a second `export *` would create for those shared bindings.
+export {
+  DATA_GLOBAL,
+  OPTIONAL_PROFILE_FIELDS,
+  parseGalleryData,
+  POLL_INTERVAL_MS,
+  reduceGalleryPoll,
+} from "./gallery-data.ts";
+export type {
+  GalleryAssetEntry,
+  GalleryCharacter,
+  GalleryData,
+  PollOutcome,
+} from "./gallery-data.ts";
 export { openDatabase } from "./db/index.ts";
 export type { Database, NewCharacter, NewAsset, CharacterPatch } from "./db/index.ts";

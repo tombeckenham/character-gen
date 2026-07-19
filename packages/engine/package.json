@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./gallery-data": "./src/gallery-data.ts"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",

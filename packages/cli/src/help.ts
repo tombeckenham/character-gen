@@ -13,7 +13,7 @@ Commands:
   speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
   extract <script-file>    Emit cast JSON from a script                      (coming soon)
   publish <char>           Create/update the character on fal Assets         (coming soon)
-  open                     Write the gallery and open it in a browser        (coming soon)
+  open                     Write the gallery and open it in a browser
   setup                    Store and validate your fal API key
   doctor                   Diagnose environment, key, and fal connectivity
 
@@ -43,8 +43,9 @@ export const COMMAND_HELP: Record<string, string> = {
   Parse a script to text and emit cast JSON for the skill to iterate on.`,
   publish: `character-gen publish <char>
   Create or update the character on the fal Assets Characters API.`,
-  open: `character-gen open
-  Write the gallery files and open the file:// URL in a browser.`,
+  open: `character-gen open [--no-browser]
+  Write the gallery files and open the file:// URL in a browser.
+  --no-browser writes the gallery and prints the URL without opening it.`,
   setup: `character-gen setup [--api-key <key>]
   Prompt for (or accept) a fal API key, validate it, and store it (0600).`,
   doctor: `character-gen doctor

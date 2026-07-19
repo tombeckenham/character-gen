@@ -7,7 +7,8 @@
   ],
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p gallery-app",
+    "build:gallery": "bun run --cwd gallery-app build",
     "lint": "oxlint .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
