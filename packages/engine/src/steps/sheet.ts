@@ -2,9 +2,12 @@ import { buildCanonClause, buildNegativeClause } from "../canon.ts";
 import type { FalClient } from "../fal.ts";
 import type { AssetRecord, CharacterProfile, CharacterRecord } from "../types.ts";
 import {
+  DEFAULT_GEN_CONCURRENCY,
   dedupedReporter,
   ensureCharacterMediaDir,
   extractImageUrl,
+  mapPool,
+  poolFailureError,
   storeAsset,
   withStepStatus,
 } from "./common.ts";
@@ -133,6 +136,12 @@ export const SHEET_VARIANTS: readonly VariantSpec[] = [
 
 export interface RunSheetDeps extends StepMediaDeps {
   generator: ImageGenerator;
+  /** Max variant generations in flight (defaults to DEFAULT_GEN_CONCURRENCY). */
+  concurrency?: number;
+  /** Called after each asset is stored (master, then each variant) — the CLI
+   * refreshes the gallery here so the core sheet lands image by image rather than
+   * all at once. Failures warn, never abort. */
+  onAsset?: (asset: AssetRecord) => void | Promise<void>;
 }
 
 export interface SheetOutcome {
@@ -140,13 +149,59 @@ export interface SheetOutcome {
   variants: AssetRecord[];
 }
 
+/** Fires the per-asset callback without letting a throwing sink fail the step. */
+async function notifyAsset(deps: RunSheetDeps, asset: AssetRecord, report: (m: string) => void) {
+  try {
+    await deps.onAsset?.(asset);
+  } catch (error) {
+    report(
+      `warning: asset notification failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/** Everything one variant-worker needs beyond the variant spec itself. */
+interface VariantContext {
+  deps: RunSheetDeps;
+  character: CharacterRecord;
+  charDir: string;
+  masterUrl: string;
+  report: (message: string) => void;
+}
+
+/** Generates, stores, and announces one derived sheet variant off the master. */
+async function generateVariant(spec: VariantSpec, ctx: VariantContext): Promise<AssetRecord> {
+  const { deps, character, charDir, masterUrl, report } = ctx;
+  report(`${spec.kind}: generating…`);
+  const prompt = spec.buildPrompt(character.profile);
+  const image = await deps.generator.edit({ prompt, imageUrls: [masterUrl] }, (update) =>
+    report(`${spec.kind}: ${update.status.toLowerCase()}`),
+  );
+  const asset = await storeAsset({
+    deps,
+    character,
+    charDir,
+    kind: spec.kind,
+    fileName: `${spec.kind}-1.png`,
+    image,
+    meta: { endpoint: EDIT_ENDPOINT, prompt },
+  });
+  await notifyAsset(deps, asset, report);
+  return asset;
+}
+
 /**
  * Generates the master reference image and the default derived variants for a
  * character, downloading each to `<mediaDir>/<identifier>/` and recording an
- * asset row (with the fal request id) per image. Marks the `sheet` status
- * running → done (it may re-run from a prior done/error, so it does not assume
- * "pending"). On failure, marks the step `error` and rethrows, leaving any
- * assets already produced intact.
+ * asset row (with the fal request id) per image. The master is generated first
+ * (the variants edit it); the variants then fan out concurrently (bounded by
+ * `concurrency`), each landing via `onAsset` as it is stored. Marks the `sheet`
+ * status running → done (it may re-run from a prior done/error, so it does not
+ * assume "pending"). If a variant fails the others still finish, then the step
+ * is marked `error` and an aggregate error is thrown, leaving any assets already
+ * produced intact.
  */
 export async function runSheet(
   character: CharacterRecord,
@@ -171,30 +226,20 @@ export async function runSheet(
       image: masterImage,
       meta: { endpoint: MASTER_ENDPOINT, prompt: masterPrompt, imageSize: MASTER_IMAGE_SIZE },
     });
+    await notifyAsset(deps, master, report);
 
-    const variants: AssetRecord[] = [];
-    for (const spec of SHEET_VARIANTS) {
-      report(`${spec.kind}: generating…`);
-      const prompt = spec.buildPrompt(character.profile);
-      // Variants are generated sequentially so progress reads cleanly; each is an
-      // independent edit of the same master, so ordering is not otherwise load-bearing.
-      // oxlint-disable-next-line no-await-in-loop
-      const image = await deps.generator.edit({ prompt, imageUrls: [masterImage.url] }, (update) =>
-        report(`${spec.kind}: ${update.status.toLowerCase()}`),
-      );
-      // oxlint-disable-next-line no-await-in-loop
-      const asset = await storeAsset({
-        deps,
-        character,
-        charDir,
-        kind: spec.kind,
-        fileName: `${spec.kind}-1.png`,
-        image,
-        meta: { endpoint: EDIT_ENDPOINT, prompt },
+    const ctx: VariantContext = { deps, character, charDir, masterUrl: masterImage.url, report };
+    const { results, failures } = await mapPool(
+      SHEET_VARIANTS,
+      deps.concurrency ?? DEFAULT_GEN_CONCURRENCY,
+      (spec) => generateVariant(spec, ctx),
+    );
+    const variants = results.filter((variant): variant is AssetRecord => variant !== undefined);
+    if (failures.length > 0) {
+      throw poolFailureError("sheet", "variants", SHEET_VARIANTS.length, failures, (index) => {
+        return SHEET_VARIANTS[index]?.kind ?? `variant ${index + 1}`;
       });
-      variants.push(asset);
     }
-
     return { master, variants };
   });
 }
