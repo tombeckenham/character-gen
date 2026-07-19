@@ -1,32 +1,65 @@
 import { PIPELINE_STEPS } from "@character-gen/engine/gallery-data";
-import type { GalleryCharacter } from "@character-gen/engine/gallery-data";
+import type {
+  GalleryAssetEntry,
+  GalleryCharacter,
+  StepState,
+} from "@character-gen/engine/gallery-data";
+import { Badge } from "@/components/ui/badge";
+
+const STEP_BADGE: Record<StepState, string> = {
+  pending: "border-border bg-transparent text-muted-foreground/70",
+  running: "animate-pulse border-sky-500/30 bg-sky-500/15 text-sky-300",
+  done: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
+  error: "border-red-500/30 bg-red-500/15 text-red-300",
+};
 
 /** Per-step status chips (profile / sheet / turnaround / voice / publish). */
 export function StatusChips({ character }: { character: GalleryCharacter }) {
   return (
-    <ul className="chips">
+    <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
       {PIPELINE_STEPS.map((step) => (
-        <li
-          key={step}
-          className={`chip chip-${character.status[step]}`}
-          title={`${step}: ${character.status[step]}`}
-        >
-          {step}
+        <li key={step}>
+          <Badge
+            variant="outline"
+            className={STEP_BADGE[character.status[step]]}
+            title={`${step}: ${character.status[step]}`}
+          >
+            {step}
+          </Badge>
         </li>
       ))}
     </ul>
   );
 }
 
-/** The card/detail hero image: the master sheet, or a monogram placeholder. */
+/** The card/detail hero: the face close-up when present, else the master. */
+export function heroAsset(character: GalleryCharacter): GalleryAssetEntry | undefined {
+  return (
+    character.assets.find((asset) => asset.kind === "face_front") ??
+    character.assets.find((asset) => asset.kind === "master")
+  );
+}
+
+/** The card hero image: face_front > master > a monogram placeholder. */
 export function Portrait({ character }: { character: GalleryCharacter }) {
-  const master = character.assets.find((asset) => asset.kind === "master");
-  if (master) {
-    return <img className="portrait" src={master.path} alt={`${character.name} — master sheet`} />;
+  const hero = heroAsset(character);
+  if (hero) {
+    return (
+      <img
+        className="aspect-3/4 w-full object-cover object-top"
+        src={hero.path}
+        alt={`${character.name} — ${hero.kind === "face_front" ? "face" : "master sheet"}`}
+      />
+    );
   }
   return (
-    <div className="portrait portrait-empty" aria-label={`${character.name} — no image yet`}>
-      <span>{character.name.slice(0, 1).toUpperCase()}</span>
+    <div
+      className="flex aspect-3/4 w-full items-center justify-center bg-muted/30"
+      aria-label={`${character.name} — no image yet`}
+    >
+      <span className="font-heading text-6xl font-semibold text-muted-foreground/60">
+        {character.name.slice(0, 1).toUpperCase()}
+      </span>
     </div>
   );
 }

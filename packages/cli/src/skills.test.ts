@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PIPELINE_STEPS } from "@character-gen/engine";
+import { PIPELINE_STEPS, SHEET_PASSES, SHEET_TIERS } from "@character-gen/engine";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 import { STUBS } from "./run.ts";
 
@@ -101,6 +101,36 @@ test("every --steps list in a skill's code names only real pipeline steps", () =
       for (const match of chunk.matchAll(/--steps\s+([a-z][a-z,]*)/gu)) {
         for (const step of (match[1] ?? "").split(",").filter((s) => s.length > 0)) {
           assert.ok(steps.has(step), `${dir}: --steps names unknown step "${step}"`);
+        }
+      }
+    }
+  }
+});
+
+test("every --tier value in a skill's code names a real tier", () => {
+  const tiers = new Set<string>(SHEET_TIERS);
+  for (const dir of skillDirs()) {
+    const skill = loadSkill(dir);
+    for (const chunk of codeChunks(skill.body)) {
+      for (const match of chunk.matchAll(/--tier\s+([a-z]+)/gu)) {
+        const tier = match[1];
+        assert.ok(
+          tier !== undefined && tiers.has(tier),
+          `${dir}: --tier names unknown tier "${tier}"`,
+        );
+      }
+    }
+  }
+});
+
+test("every --passes list in a skill's code names only real sheet passes", () => {
+  const passes = new Set<string>(SHEET_PASSES);
+  for (const dir of skillDirs()) {
+    const skill = loadSkill(dir);
+    for (const chunk of codeChunks(skill.body)) {
+      for (const match of chunk.matchAll(/--passes\s+([a-z][a-z,]*)/gu)) {
+        for (const pass of (match[1] ?? "").split(",").filter((s) => s.length > 0)) {
+          assert.ok(passes.has(pass), `${dir}: --passes names unknown pass "${pass}"`);
         }
       }
     }

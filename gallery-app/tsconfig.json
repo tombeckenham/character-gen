@@ -2,7 +2,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "lib": ["esnext", "dom", "dom.iterable"],
-    "types": []
+    "types": [],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

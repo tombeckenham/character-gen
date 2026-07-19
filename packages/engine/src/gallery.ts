@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isValidIdentifier } from "./character.ts";
-import { DATA_GLOBAL, OPTIONAL_PROFILE_FIELDS } from "./gallery-data.ts";
+import { ASSET_ANNOTATION_FIELDS, DATA_GLOBAL, OPTIONAL_PROFILE_FIELDS } from "./gallery-data.ts";
 import type { GalleryAssetEntry, GalleryCharacter, GalleryData } from "./gallery-data.ts";
 import type { AssetRecord, CharacterRecord } from "./types.ts";
 import type { Database } from "./db/index.ts";
@@ -103,7 +103,15 @@ function copyAssets(
     try {
       const fileName = copyContentAddressed(asset.localPath, charMediaDir);
       // Built by hand (not join) so the payload always uses URL-style slashes.
-      entries.push({ kind: asset.kind, path: `media/${character.identifier}/${fileName}` });
+      const entry: GalleryAssetEntry = {
+        kind: asset.kind,
+        path: `media/${character.identifier}/${fileName}`,
+      };
+      for (const field of ASSET_ANNOTATION_FIELDS) {
+        const value = asset.meta?.[field];
+        if (typeof value === "string" && value.length > 0) entry[field] = value;
+      }
+      entries.push(entry);
     } catch (error) {
       warn(
         `gallery: skipping ${character.identifier}/${asset.kind} — copy failed: ${

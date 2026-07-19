@@ -1,3 +1,4 @@
+import { buildCanonClause, buildNegativeClause } from "../canon.ts";
 import type { FalClient } from "../fal.ts";
 import type { AssetRecord, CharacterProfile, CharacterRecord } from "../types.ts";
 import {
@@ -77,16 +78,13 @@ export function makeFalImageGenerator(client: FalClient): ImageGenerator {
 /** Master reference-sheet prompt: full-body, neutral, identity-defining. */
 export function buildMasterPrompt(profile: CharacterProfile): string {
   const descriptor = [profile.name, profile.archetype].filter(Boolean).join(", ");
-  const canon = profile.visualCanon?.trim();
+  const canon = buildCanonClause(profile);
   return [
     `Full-body character reference sheet of ${descriptor}.`,
-    canon
-      ? `Appearance to reproduce exactly: ${canon}.`
-      : profile.personality
-        ? `Character: ${profile.personality}.`
-        : "",
+    canon || (profile.personality ? `Character: ${profile.personality}.` : ""),
     "Single character centered, standing in a neutral A-pose, facing the camera, full body from head to feet in frame.",
     "Plain light-gray studio background, soft even lighting, consistent art style, sharp detail. No text, no labels, no watermark, no border.",
+    buildNegativeClause(profile),
   ]
     .filter(Boolean)
     .join(" ");
@@ -97,8 +95,13 @@ export function buildExpressionPrompt(profile: CharacterProfile): string {
   return [
     `Expression sheet for ${profile.name}: the exact same character as the reference image, with an identical face, hairstyle, and outfit.`,
     "A neat grid of head-and-shoulders portraits of this same character showing distinct facial expressions: neutral, happy, angry, sad, and surprised.",
-    "Preserve the character's identity and features exactly. Plain light-gray background, even lighting, consistent art style. No text or labels.",
-  ].join(" ");
+    "Preserve the character's identity and features exactly.",
+    buildCanonClause(profile),
+    "Plain light-gray background, even lighting, consistent art style. No text or labels.",
+    buildNegativeClause(profile),
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** Outfit-variant edit prompt: same identity, alternate clothing. */
@@ -109,8 +112,12 @@ export function buildOutfitPrompt(profile: CharacterProfile): string {
       archetype ? ` befitting a ${archetype}` : ""
     }.`,
     "Keep the character's identity and recognizable features unchanged; change only the clothing.",
+    buildCanonClause(profile),
     "Neutral A-pose, plain light-gray background, even lighting, consistent art style. No text or watermark.",
-  ].join(" ");
+    buildNegativeClause(profile),
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 interface VariantSpec {

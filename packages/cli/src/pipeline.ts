@@ -4,11 +4,11 @@ import {
   ensureStateDirs,
   makeFalAngleGenerator,
   makeFalClient,
-  makeFalImageGenerator,
   openDatabase,
   refreshGalleryIfPresent,
   resolveFalKey,
   runSheet,
+  runSheetPasses,
   runTurnaround,
   statePaths,
 } from "@character-gen/engine";
@@ -18,6 +18,7 @@ import type {
   Database,
   FalClient,
   ImageGenerator,
+  SheetPass,
   StatePaths,
 } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
@@ -70,6 +71,24 @@ function assetLine(asset: { kind: string; localPath: string | null }): string {
   return `  ${asset.kind.padEnd(10)} ${asset.localPath ?? "(no path)"}`;
 }
 
+/**
+ * Progress sink that also refreshes the gallery once, on the first message.
+ * A step's first report fires just after it marks itself `running`, so an open
+ * page flips the status chip to "running" immediately instead of when the
+ * step's first asset (or its end) lands. Fire-and-forget: refreshGallery never
+ * throws, and the writer's atomic data.js rename makes concurrent runs safe.
+ */
+function progressWithLiveStart(db: Database, paths: StatePaths): (message: string) => void {
+  let refreshed = false;
+  return (message: string): void => {
+    err(message);
+    if (!refreshed) {
+      refreshed = true;
+      void refreshGallery(db, paths);
+    }
+  };
+}
+
 export function runSheetAndReport(
   db: Database,
   character: CharacterRecord,
@@ -81,11 +100,38 @@ export function runSheetAndReport(
       db,
       generator,
       mediaDir: paths.mediaDir,
-      onProgress: err,
+      onProgress: progressWithLiveStart(db, paths),
     });
     return [
       `Sheet complete for ${character.identifier}: master + ${outcome.variants.length} variants.`,
       ...[outcome.master, ...outcome.variants].map((asset) => assetLine(asset)),
+    ];
+  });
+}
+
+export function runSheetPassesAndReport(
+  db: Database,
+  character: CharacterRecord,
+  generator: ImageGenerator,
+  paths: StatePaths,
+  passes: readonly SheetPass[],
+  detailCap: number,
+): Promise<boolean> {
+  return reportStep(db, paths, "Sheet passes", async () => {
+    const outcome = await runSheetPasses(character, {
+      db,
+      generator,
+      mediaDir: paths.mediaDir,
+      onProgress: progressWithLiveStart(db, paths),
+      passes,
+      detailCap,
+      // Per-asset refresh so an open gallery fills in shot by shot
+      // (refreshGallery never throws — failures only warn).
+      onAsset: () => refreshGallery(db, paths),
+    });
+    return [
+      `Passes complete for ${character.identifier} (${passes.join(", ")}): ${outcome.assets.length} images.`,
+      ...outcome.assets.map((asset) => assetLine(asset)),
     ];
   });
 }
@@ -101,7 +147,7 @@ export function runTurnaroundAndReport(
       db,
       generator,
       mediaDir: paths.mediaDir,
-      onProgress: err,
+      onProgress: progressWithLiveStart(db, paths),
       // Per-frame refresh so an open gallery shows the spin filling in live
       // (refreshGallery never throws — failures only warn).
       onFrame: () => refreshGallery(db, paths),
@@ -114,7 +160,7 @@ export function runTurnaroundAndReport(
 }
 
 interface StepCmdSpec<G> {
-  name: "sheet" | "turnaround";
+  name: "turnaround";
   makeGenerator: (client: FalClient) => G;
   runAndReport: (
     db: Database,
@@ -163,20 +209,6 @@ async function cmdStep<G>(
   } finally {
     db.close();
   }
-}
-
-export interface SheetDeps {
-  env?: NodeJS.ProcessEnv;
-  /** Override the fal-backed image generator (tests run offline). */
-  generator?: ImageGenerator;
-}
-
-export function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<number> {
-  return cmdStep(rest, deps, {
-    name: "sheet",
-    makeGenerator: makeFalImageGenerator,
-    runAndReport: runSheetAndReport,
-  });
 }
 
 export interface TurnaroundDeps {

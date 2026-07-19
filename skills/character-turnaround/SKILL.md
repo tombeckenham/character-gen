@@ -25,7 +25,7 @@ Generates 8 views of an existing character at 45° increments (0° front → 315
 
    This is 8 image generations run sequentially — expect a few minutes. Progress streams per angle.
 
-5. Report: point the user at the character's detail page in the gallery — click the card, then **drag horizontally or scroll on the turnaround image to spin the character**. Say how many of the 8 frames landed; a failure stops the run at that angle, so if it stopped early, report where.
+5. Report: point the user at the character's detail page in the gallery — **drag horizontally or scroll on the turnaround image to spin the character**. Say how many of the 8 frames landed; a failure stops the run at that angle, so if it stopped early, report where. ALWAYS end the report with the character's deep link (`file://<gallery dir>/index.html#/c/<identifier>` — the gallery path is printed by `character-gen open`), so the spin is one click away.
 
 ## Notes
 

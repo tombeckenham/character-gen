@@ -9,11 +9,19 @@ export type TurnaroundAngle = (typeof TURNAROUND_ANGLES)[number];
 /** Asset kinds for the 8 turnaround frames, e.g. `angle_45`. */
 export type AngleKind = `angle_${TurnaroundAngle}`;
 
+/** The three dedicated face views, in display (triptych) order. */
+export const FACE_KINDS = ["face_front", "face_three_quarter", "face_profile"] as const;
+
+export type FaceKind = (typeof FACE_KINDS)[number];
+
 /** The `assets.kind` string union — angle members derived from TURNAROUND_ANGLES. */
 export const ASSET_KINDS = [
   "master",
   "expression",
   "outfit",
+  ...FACE_KINDS,
+  "detail",
+  "scale",
   ...TURNAROUND_ANGLES.map((angle) => `angle_${angle}` as const),
   "voice_sample",
   "speech",
@@ -36,6 +44,40 @@ export function angleFromKind(kind: string): TurnaroundAngle | null {
     : null;
 }
 
+/**
+ * The rich-sheet generation passes, in canonical run order. Each pass is a
+ * separate invocation over the shared step core, but all of them roll up into
+ * the existing `sheet` pipeline step.
+ */
+export const SHEET_PASSES = ["face", "expressions", "details", "scale"] as const;
+
+export type SheetPass = (typeof SHEET_PASSES)[number];
+
+/** Sheet richness tiers — the CLI/skill vocabulary for how much to generate. */
+export const SHEET_TIERS = ["core", "rich", "full"] as const;
+
+export type SheetTier = (typeof SHEET_TIERS)[number];
+
+/** The extra passes each tier runs after the core sheet. */
+export const TIER_PASSES: Record<SheetTier, readonly SheetPass[]> = {
+  core: [],
+  rich: ["face", "expressions", "details"],
+  full: ["face", "expressions", "details", "scale"],
+};
+
+/** Detail-macro budget per tier (hands + imperfection/prop macros). */
+export const TIER_DETAIL_CAP: Record<SheetTier, number> = {
+  core: 0,
+  rich: 2,
+  full: 4,
+};
+
+/** Detail-macro cap when `--passes details` is invoked without a tier. */
+export const MAX_DETAIL_MACROS = 4;
+
+/** The expression set generated when a profile does not name its own. */
+export const DEFAULT_EXPRESSIONS = ["joy", "anger", "fear", "exhaustion"] as const;
+
 /** Pipeline steps whose progress we track per character. */
 export const PIPELINE_STEPS = ["profile", "sheet", "turnaround", "voice", "publish"] as const;
 
@@ -55,10 +97,15 @@ export const IMPLEMENTED_STEPS = [
 export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];
 
 /**
- * What `create` runs when `--steps` is omitted. The turnaround is implemented
- * but costs 8 generations, so it stays opt-in rather than a default.
+ * What `create` runs when `--steps` is omitted. The turnaround (8 generations)
+ * is part of the default experience — a character isn't done until you can
+ * spin them; skip it with an explicit `--steps profile,sheet`.
  */
-export const DEFAULT_CREATE_STEPS = ["profile", "sheet"] as const satisfies readonly PipelineStep[];
+export const DEFAULT_CREATE_STEPS = [
+  "profile",
+  "sheet",
+  "turnaround",
+] as const satisfies readonly PipelineStep[];
 
 export const STEP_STATES = ["pending", "running", "done", "error"] as const;
 
@@ -77,6 +124,37 @@ export function emptyStatus(): CharacterStatus {
   };
 }
 
+/** Structured physical traits — every field optional prose except height. */
+export interface PhysicalTraits {
+  apparentAge?: string;
+  build?: string;
+  heightCm?: number;
+  skin?: string;
+  eyes?: string;
+  hair?: string;
+  face?: string;
+}
+
+/**
+ * One identity-anchoring imperfection: what it is, where it sits, and the story
+ * behind it. Models keep a chipped tooth or a mended seam consistent far more
+ * reliably than generic prose, so each one is injected into every image prompt
+ * and gets its own macro shot in the `details` pass.
+ */
+export interface Imperfection {
+  what: string;
+  where: string;
+  story?: string;
+}
+
+/** How the character moves and rests — consumed by video prompts later. */
+export interface MotionTraits {
+  gait?: string;
+  posture?: string;
+  restingFace?: string;
+  habit?: string;
+}
+
 /**
  * The character profile Claude authors in the skill flow. Only `name` and
  * `identifier` are load-bearing for the engine; the rest is free-form canon the
@@ -91,6 +169,17 @@ export interface CharacterProfile {
   /** Locked physical description reused verbatim in every image prompt. */
   visualCanon?: string;
   voiceDescription?: string;
+  physical?: PhysicalTraits;
+  imperfections?: Imperfection[];
+  /** Props/garments the character always carries or wears. */
+  signatureItems?: string[];
+  palette?: string[];
+  materials?: string[];
+  motion?: MotionTraits;
+  /** The character's own emotional range; DEFAULT_EXPRESSIONS when absent. */
+  expressions?: string[];
+  /** Things the character would never look like/do — negative guidance. */
+  negativeCanon?: string[];
   [key: string]: unknown;
 }
 
