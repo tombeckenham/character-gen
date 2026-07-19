@@ -6,6 +6,21 @@ Agent-first character generator for the fal.ai hackathon. You sit in Claude Code
 
 ## Install
 
+### 1. Add the Claude Code plugin
+
+In Claude Code, register this repo as a plugin marketplace and install the plugin:
+
+```
+/plugin marketplace add tombeckenham/character-gen
+/plugin install character-gen@character-gen
+```
+
+That gives you the **cast** skill and `/cast` command — the agent surface that authors profiles and drives the pipeline.
+
+### 2. Install the CLI it drives
+
+The skill runs a local `character-gen` CLI. Install it onto your PATH:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tombeckenham/character-gen/main/install.sh | sh
 ```
@@ -14,9 +29,11 @@ Requirements: git, Node ≥ 22.18 (the CLI runs TypeScript directly via type str
 
 Then either export `FAL_KEY`, reuse an existing `~/.genmedia/config.json`, or run `character-gen setup`.
 
+> The curl installer also drops the **cast** skill into `~/.claude/skills`, so it works standalone without the plugin — but the plugin is the tidiest way to keep the skill and `/cast` command up to date.
+
 ## Use it from Claude Code
 
-The installer drops the **cast** skill into `~/.claude/skills`. In Claude Code, just ask:
+Once the plugin (or installer) has added the **cast** skill, just ask:
 
 > create a surprise character — something weird
 
