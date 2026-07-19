@@ -1,5 +1,6 @@
 import { genmediaConfigPath, statePaths } from "./paths.ts";
 import { readApiKeyFromFile } from "./config.ts";
+import { decodeGenmediaApiKey } from "./genmedia-key.ts";
 import type { KeyResolution } from "./types.ts";
 
 export interface KeyResolutionOptions {
@@ -17,7 +18,10 @@ export interface KeyResolutionOptions {
  *   2. `~/.genmedia/config.json` → `apiKey` (reuse the genmedia CLI's key)
  *   3. `<state dir>/config.json` → `apiKey` (written by `character-gen setup`)
  *
- * Malformed or missing config files are skipped, never thrown.
+ * genmedia stores its `apiKey` encrypted at rest, so its value is decoded via
+ * {@link decodeGenmediaApiKey} before use; an undecryptable genmedia key is
+ * skipped (falls through to the state config) rather than handed to fal as
+ * ciphertext. Malformed or missing config files are skipped, never thrown.
  */
 export function resolveFalKey(options: KeyResolutionOptions = {}): KeyResolution {
   const env = options.env ?? process.env;
@@ -28,7 +32,8 @@ export function resolveFalKey(options: KeyResolutionOptions = {}): KeyResolution
   }
 
   const genmediaPath = options.genmediaConfigPath ?? genmediaConfigPath(env);
-  const genmediaKey = readApiKeyFromFile(genmediaPath);
+  const genmediaStored = readApiKeyFromFile(genmediaPath);
+  const genmediaKey = genmediaStored ? decodeGenmediaApiKey(genmediaStored) : null;
   if (genmediaKey) {
     return { ok: true, key: genmediaKey, source: "genmedia" };
   }
