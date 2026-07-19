@@ -9,30 +9,11 @@ import {
   storeValidatedKey,
 } from "@character-gen/engine";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
-
-function out(line: string): void {
-  output.write(`${line}\n`);
-}
-
-function err(line: string): void {
-  process.stderr.write(`${line}\n`);
-}
+import { err, out, wantsHelp } from "./io.ts";
+import { cmdCreate, cmdSheet } from "./pipeline.ts";
 
 /** Pipeline commands that are recognized but not built yet. */
-const STUBS = new Set([
-  "create",
-  "sheet",
-  "open",
-  "turnaround",
-  "voice",
-  "speak",
-  "publish",
-  "extract",
-]);
-
-function wantsHelp(rest: string[]): boolean {
-  return rest.includes("--help") || rest.includes("-h");
-}
+const STUBS = new Set(["open", "turnaround", "voice", "speak", "publish", "extract"]);
 
 /** Resolves the fal key for `setup` from --api-key or an interactive prompt.
  * Returns the key, or an error message for the caller to print. */
@@ -191,6 +172,10 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
       return cmdSetup(rest);
     case "doctor":
       return cmdDoctor(rest);
+    case "create":
+      return cmdCreate(rest);
+    case "sheet":
+      return cmdSheet(rest);
     case "list":
       return cmdList(rest);
     case "show":

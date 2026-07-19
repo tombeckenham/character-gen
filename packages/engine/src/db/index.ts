@@ -12,6 +12,7 @@ import type {
   CharacterProfile,
   CharacterRecord,
   CharacterStatus,
+  PipelineStep,
   StepState,
 } from "../types.ts";
 
@@ -102,7 +103,16 @@ export interface Database {
   getCharacter(idOrIdentifier: string): Promise<CharacterRecord | null>;
   listCharacters(): Promise<CharacterRecord[]>;
   updateCharacter(id: string, patch: CharacterPatch): Promise<CharacterRecord | null>;
+  /**
+   * Sets a single pipeline step's state, reading the row's current status fresh
+   * so a stale in-memory snapshot can't clobber sibling steps. Throws if the
+   * character no longer exists (a vanished row is a bug, never a silent no-op).
+   */
+  setStepState(id: string, step: PipelineStep, state: StepState): Promise<CharacterRecord>;
   insertAsset(input: NewAsset): Promise<AssetRecord>;
+  /** Sets an asset's local file path after its download lands. Throws if the
+   * asset row is gone. */
+  setAssetLocalPath(id: string, localPath: string): Promise<AssetRecord>;
   getAssets(characterId: string): Promise<AssetRecord[]>;
   setSetting(key: string, value: string): Promise<void>;
   getSetting(key: string): Promise<string | null>;
@@ -183,6 +193,22 @@ export function openDatabase(dbFile: string): Database {
       return row ? rowToCharacter(row) : null;
     },
 
+    async setStepState(id, step, state) {
+      const rows = await db.select().from(characters).where(eq(characters.id, id)).limit(1);
+      const row = rows[0];
+      if (!row) throw new Error(`setStepState: character ${id} not found`);
+      const status = normalizeStatus(JSON.parse(row.status));
+      status[step] = state;
+      await db
+        .update(characters)
+        .set({ status: JSON.stringify(status), updatedAt: Date.now() })
+        .where(eq(characters.id, id));
+      const updated = await db.select().from(characters).where(eq(characters.id, id)).limit(1);
+      const updatedRow = updated[0];
+      if (!updatedRow) throw new Error(`setStepState: character ${id} vanished mid-update`);
+      return rowToCharacter(updatedRow);
+    },
+
     async insertAsset(input) {
       const record: AssetRecord = {
         id: input.id ?? randomUUID(),
@@ -205,6 +231,14 @@ export function openDatabase(dbFile: string): Database {
         createdAt: record.createdAt,
       });
       return record;
+    },
+
+    async setAssetLocalPath(id, localPath) {
+      await db.update(assets).set({ localPath }).where(eq(assets.id, id));
+      const rows = await db.select().from(assets).where(eq(assets.id, id)).limit(1);
+      const row = rows[0];
+      if (!row) throw new Error(`setAssetLocalPath: asset ${id} not found`);
+      return rowToAsset(row);
     },
 
     async getAssets(characterId) {

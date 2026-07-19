@@ -41,6 +41,15 @@ export const PIPELINE_STEPS = ["profile", "sheet", "turnaround", "voice", "publi
 
 export type PipelineStep = (typeof PIPELINE_STEPS)[number];
 
+/**
+ * The subset of PIPELINE_STEPS that `create` can actually run today. The rest of
+ * PIPELINE_STEPS are recognized (for clear "not built yet" errors) but not
+ * implemented. This is the single list a future phase flips a step on in.
+ */
+export const IMPLEMENTED_STEPS = ["profile", "sheet"] as const;
+
+export type ImplementedStep = (typeof IMPLEMENTED_STEPS)[number];
+
 export const STEP_STATES = ["pending", "running", "done", "error"] as const;
 
 export type StepState = (typeof STEP_STATES)[number];

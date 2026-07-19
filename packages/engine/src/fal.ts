@@ -1,4 +1,4 @@
-import { createFalClient } from "@fal-ai/client";
+import { ApiError, createFalClient } from "@fal-ai/client";
 
 export const FAL_REST_BASE = "https://api.fal.ai/v1";
 
@@ -13,6 +13,48 @@ export function makeFalClient(key: string): FalClient {
 }
 
 export type FetchImpl = typeof fetch;
+
+/** Renders a fal `ApiError` body (validation `detail`, string, or JSON) to a
+ * single-line detail string, or null when there is nothing useful to add. */
+function formatFalErrorBody(body: unknown): string | null {
+  if (body === null || body === undefined) return null;
+  if (typeof body === "string") return body.length > 0 ? body : null;
+  if (typeof body === "object") {
+    const detail = (body as { detail?: unknown }).detail;
+    if (Array.isArray(detail)) {
+      const parts = detail.map((entry) => {
+        if (entry !== null && typeof entry === "object") {
+          const loc = (entry as { loc?: unknown }).loc;
+          const msg = (entry as { msg?: unknown }).msg;
+          const where = Array.isArray(loc) ? loc.join(".") : "";
+          return where ? `${where}: ${String(msg)}` : String(msg);
+        }
+        return String(entry);
+      });
+      if (parts.length > 0) return parts.join("; ");
+    }
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return null;
+    }
+  }
+  return String(body);
+}
+
+/**
+ * Turns any thrown value into a readable message. For a fal `ApiError` it folds
+ * in the HTTP status and the response body detail, so a 422 surfaces the failing
+ * field instead of a bare "Unprocessable Entity".
+ */
+export function describeError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const detail = formatFalErrorBody(error.body);
+    const base = `${error.message} (${error.status})`;
+    return detail ? `${base}: ${detail}` : base;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** True for an abort/timeout rejection (`AbortSignal.timeout` → TimeoutError). */
 export function isTimeoutError(err: unknown): boolean {
