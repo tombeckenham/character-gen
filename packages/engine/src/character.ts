@@ -16,6 +16,22 @@ const IDENTIFIER_RE = /^[a-z0-9-]+$/u;
 
 const MAX_IDENTIFIER_LENGTH = 64;
 
+/** Cap on a derived display name before it is truncated with an ellipsis. */
+const MAX_DERIVED_NAME_LENGTH = 60;
+
+/**
+ * True when `identifier` is a well-formed slug the engine will trust in a file
+ * path: non-empty, within the length cap, and only `[a-z0-9-]`. Notably rejects
+ * `/`, `.`, and `..`, so it doubles as a path-traversal guard.
+ */
+export function isValidIdentifier(identifier: string): boolean {
+  return (
+    identifier.length > 0 &&
+    identifier.length <= MAX_IDENTIFIER_LENGTH &&
+    IDENTIFIER_RE.test(identifier)
+  );
+}
+
 /**
  * Turns arbitrary text into a lowercase hyphen slug suitable for an identifier:
  * strips diacritics, collapses non-alphanumerics to single hyphens, trims edge
@@ -92,6 +108,45 @@ export function isUniqueConstraintError(err: unknown): boolean {
     current = (current as { cause?: unknown }).cause;
   }
   return false;
+}
+
+/**
+ * Builds an identifier from `base` that is unique against existing characters,
+ * appending `-2`, `-3`, … when taken. The stem is truncated to leave room for
+ * the suffix and re-trimmed so a cut landing on a hyphen can't emit `foo--2` or
+ * exceed the length cap — which also prevents the fixed-point hang when `base`
+ * is already MAX_IDENTIFIER_LENGTH chars.
+ */
+async function uniqueIdentifier(db: Database, base: string): Promise<string> {
+  if (!(await db.getCharacter(base))) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const marker = `-${suffix}`;
+    const stem = base.slice(0, MAX_IDENTIFIER_LENGTH - marker.length).replaceAll(/-+$/gu, "");
+    const candidate = `${stem}${marker}`;
+    // Sequential by nature: each candidate depends on the previous lookup miss.
+    // oxlint-disable-next-line no-await-in-loop
+    if (!(await db.getCharacter(candidate))) return candidate;
+  }
+}
+
+/**
+ * Derives a minimal, valid profile from a free-form description when Claude has
+ * not supplied one: a truncated display name and a unique slug identifier. The
+ * result is run through `validateProfile` so every profile — authored or
+ * derived — reaches `createCharacter` through the same guard.
+ */
+export async function deriveMinimalProfile(
+  db: Database,
+  description: string,
+): Promise<CharacterProfile> {
+  const trimmed = description.trim();
+  const name =
+    trimmed.length > MAX_DERIVED_NAME_LENGTH
+      ? `${trimmed.slice(0, MAX_DERIVED_NAME_LENGTH - 1).trimEnd()}…`
+      : trimmed;
+  const base = slugify(trimmed) || "character";
+  const identifier = await uniqueIdentifier(db, base);
+  return validateProfile({ name, identifier, description: trimmed });
 }
 
 /**

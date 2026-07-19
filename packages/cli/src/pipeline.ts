@@ -2,24 +2,34 @@ import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import {
   createCharacter,
+  deriveMinimalProfile,
+  describeError,
   ensureStateDirs,
+  IMPLEMENTED_STEPS,
   makeFalClient,
   makeFalImageGenerator,
   openDatabase,
+  PIPELINE_STEPS,
   resolveFalKey,
   runSheet,
-  slugify,
   statePaths,
   validateProfile,
 } from "@character-gen/engine";
-import type { CharacterProfile, CharacterRecord, Database, FalClient } from "@character-gen/engine";
+import type {
+  CharacterProfile,
+  CharacterRecord,
+  Database,
+  FalClient,
+  PipelineStep,
+} from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
 
-/** Pipeline steps `create` can run today, and those reserved for later phases. */
-const AVAILABLE_STEPS = new Set(["profile", "sheet"]);
-const LATER_PHASE_STEPS = new Set(["turnaround", "voice", "publish"]);
-const DEFAULT_STEPS = ["profile", "sheet"];
+// Which steps `create` implements vs. merely recognizes are both derived from the
+// engine's canonical lists, so a future phase enabling a step touches one place.
+const IMPLEMENTED = new Set<string>(IMPLEMENTED_STEPS);
+const RECOGNIZED = new Set<string>(PIPELINE_STEPS);
+const AVAILABLE_LABEL = IMPLEMENTED_STEPS.join(", ");
 
 /** Resolves a fal client from the ambient key, or an error message to print. */
 function resolveClient(): { client: FalClient } | { error: string } {
@@ -48,45 +58,28 @@ function loadProfileJson(path: string): { data: unknown } | { error: string } {
   }
 }
 
-/** Splits/validates the --steps list, defaulting to profile+sheet. Later-phase
- * steps and unknown steps each yield a distinct, friendly error. */
-function parseSteps(raw: string | undefined): { steps: string[] } | { error: string } {
-  if (raw === undefined) return { steps: DEFAULT_STEPS };
-  const steps = raw
+/** Splits/validates the --steps list, defaulting to the implemented steps. A
+ * recognized-but-unimplemented step and an unknown step give distinct errors. */
+function parseSteps(raw: string | undefined): { steps: PipelineStep[] } | { error: string } {
+  if (raw === undefined) return { steps: [...IMPLEMENTED_STEPS] };
+  const requested = raw
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  if (steps.length === 0) {
-    return { error: "--steps was empty. Pass a comma-separated list like profile,sheet." };
+  if (requested.length === 0) {
+    return { error: `--steps was empty. Pass a comma-separated list like ${AVAILABLE_LABEL}.` };
   }
-  for (const step of steps) {
-    if (LATER_PHASE_STEPS.has(step)) {
-      return {
-        error: `Step "${step}" is coming in a later phase — not available in this build yet.`,
-      };
+  const steps: PipelineStep[] = [];
+  for (const step of requested) {
+    if (!RECOGNIZED.has(step)) {
+      return { error: `Unknown step "${step}". Available steps: ${AVAILABLE_LABEL}.` };
     }
-    if (!AVAILABLE_STEPS.has(step)) {
-      return { error: `Unknown step "${step}". Available steps: profile, sheet.` };
+    if (!IMPLEMENTED.has(step)) {
+      return { error: `Step "${step}" is recognized but not implemented yet.` };
     }
+    steps.push(step as PipelineStep);
   }
   return { steps };
-}
-
-/** Derives a minimal profile from a free-form description when no --profile-json
- * is given: a truncated name and a slugified identifier made unique against the DB. */
-async function deriveMinimalProfile(db: Database, description: string): Promise<CharacterProfile> {
-  const trimmed = description.trim();
-  const name = trimmed.length > 60 ? `${trimmed.slice(0, 57).trimEnd()}…` : trimmed;
-  const base = slugify(trimmed) || "character";
-  let identifier = base;
-  let suffix = 2;
-  // Walk suffixes until an unused identifier is found.
-  // oxlint-disable-next-line no-await-in-loop
-  while (await db.getCharacter(identifier)) {
-    identifier = `${base}-${suffix}`.slice(0, 64);
-    suffix += 1;
-  }
-  return { name, identifier, description: trimmed };
 }
 
 /** Runs the sheet step for a character, streaming progress to stderr and a
@@ -114,13 +107,13 @@ async function runSheetAndReport(
     }
     return true;
   } catch (error) {
-    err(`Sheet generation failed: ${error instanceof Error ? error.message : String(error)}`);
+    err(`Sheet generation failed: ${describeError(error)}`);
     return false;
   }
 }
 
 /** Resolves the profile to create from --profile-json or a positional
- * description, opening the DB only for the derivation path. */
+ * description; uses the DB to make a derived identifier unique. */
 async function resolveProfile(
   db: Database,
   profileJsonPath: string | undefined,
@@ -163,7 +156,7 @@ export async function cmdCreate(rest: string[]): Promise<number> {
 
   if (values["surprise"]) {
     err(
-      "--surprise is handled by the create-character skill, which rolls a profile and passes it via --profile-json. Run that skill instead.",
+      "--surprise is designed for the create-character skill, which rolls a profile and passes it via --profile-json. For now, pass --profile-json directly.",
     );
     return 1;
   }

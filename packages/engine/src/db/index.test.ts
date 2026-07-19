@@ -1,3 +1,4 @@
+// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -246,6 +247,69 @@ test("updateCharacter on a nonexistent id returns null", async () => {
   try {
     const result = await db.updateCharacter("no-such-id", { name: "Nobody" });
     assert.equal(result, null);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setStepState updates one step from fresh status and preserves siblings", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    const created = await db.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile,
+      status: {
+        profile: "done",
+        sheet: "pending",
+        turnaround: "pending",
+        voice: "pending",
+        publish: "pending",
+      },
+    });
+    const updated = await db.setStepState(created.id, "sheet", "running");
+    assert.equal(updated.status.sheet, "running");
+    assert.equal(updated.status.profile, "done", "sibling step preserved");
+    const refetched = await db.getCharacter(created.id);
+    assert.equal(refetched?.status.sheet, "running");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setStepState throws loudly for a vanished character (never a silent no-op)", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    await assert.rejects(() => db.setStepState("no-such-id", "sheet", "done"), /not found/u);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setAssetLocalPath patches the path and throws for a missing asset", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    const character = await db.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile,
+    });
+    const asset = await db.insertAsset({
+      characterId: character.id,
+      kind: "master",
+      falRequestId: "req-1",
+      localPath: null,
+    });
+    const patched = await db.setAssetLocalPath(asset.id, "/media/isolde/master-1.png");
+    assert.equal(patched.localPath, "/media/isolde/master-1.png");
+    assert.equal(patched.falRequestId, "req-1", "request id preserved");
+    await assert.rejects(() => db.setAssetLocalPath("no-such-asset", "/x"), /not found/u);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

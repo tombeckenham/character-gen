@@ -1,14 +1,19 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isValidIdentifier } from "../character.ts";
 import type { FalClient, FetchImpl } from "../fal.ts";
-import type { AssetRecord, CharacterProfile, CharacterRecord, StepState } from "../types.ts";
+import type { AssetRecord, CharacterProfile, CharacterRecord } from "../types.ts";
 import type { Database } from "../db/index.ts";
 
 /** Master reference model + the edit model used for all derived variants. */
 export const MASTER_ENDPOINT = "openai/gpt-image-2";
 export const EDIT_ENDPOINT = "openai/gpt-image-2/edit";
-/** Portrait keeps a full-body figure well-framed; both dims are 16-multiples. */
+/** Portrait keeps a full-body figure well-framed. */
 export const MASTER_IMAGE_SIZE = "portrait_4_3";
+
+/** Default per-image download timeout — generous vs. falRest's 10s: a multi-MB
+ * PNG fetch legitimately takes longer. */
+export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 /** One generated image: the fal request id (doubles as a publish reference) and
  * the fal-hosted URL to download. */
@@ -61,8 +66,8 @@ function extractImageUrl(data: unknown): string {
 }
 
 /**
- * Real `ImageGenerator` backed by the phase-1 fal client's queue `subscribe`.
- * Conforms to the verified gpt-image-2 schemas: text-to-image takes `prompt` +
+ * Real `ImageGenerator` backed by the fal client's queue `subscribe`. Conforms
+ * to the verified gpt-image-2 schemas: text-to-image takes `prompt` +
  * `image_size` + `quality`; edit takes required `image_urls` + `prompt`.
  */
 export function makeFalImageGenerator(client: FalClient): ImageGenerator {
@@ -149,6 +154,8 @@ export interface RunSheetDeps {
   mediaDir: string;
   /** Injectable downloader so tests avoid the network (defaults to global fetch). */
   fetchImpl?: FetchImpl;
+  /** Per-image download timeout (defaults to DEFAULT_DOWNLOAD_TIMEOUT_MS). */
+  downloadTimeoutMs?: number;
   /** Progress sink for queue updates and step transitions (defaults to no-op). */
   onProgress?: (message: string) => void;
 }
@@ -158,18 +165,15 @@ export interface SheetOutcome {
   variants: AssetRecord[];
 }
 
-async function downloadTo(url: string, dest: string, fetchImpl: FetchImpl): Promise<void> {
-  const res = await fetchImpl(url);
+async function downloadTo(
+  url: string,
+  dest: string,
+  fetchImpl: FetchImpl,
+  timeoutMs: number,
+): Promise<void> {
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`Failed to download image (HTTP ${res.status}) from ${url}`);
   writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
-}
-
-async function updateStep(
-  db: Database,
-  character: CharacterRecord,
-  state: StepState,
-): Promise<void> {
-  await db.updateCharacter(character.id, { status: { ...character.status, sheet: state } });
 }
 
 interface StoreImageArgs {
@@ -182,27 +186,38 @@ interface StoreImageArgs {
   meta: Record<string, unknown>;
 }
 
-/** Downloads one generated image to disk and records it as an asset row. */
+/**
+ * Records the asset row FIRST (with the billed fal request_id), then downloads
+ * the file and patches in the local path. A download failure leaves the row with
+ * a null `local_path` so the request_id stays referenceable for publish/retry.
+ */
 async function storeImage(args: StoreImageArgs): Promise<AssetRecord> {
   const { deps, character, charDir, kind, fileName, image, meta } = args;
-  const localPath = join(charDir, fileName);
-  await downloadTo(image.url, localPath, deps.fetchImpl ?? fetch);
-  return deps.db.insertAsset({
+  const asset = await deps.db.insertAsset({
     characterId: character.id,
     kind,
     falRequestId: image.requestId,
     url: image.url,
-    localPath,
+    localPath: null,
     meta,
   });
+  const localPath = join(charDir, fileName);
+  await downloadTo(
+    image.url,
+    localPath,
+    deps.fetchImpl ?? fetch,
+    deps.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  );
+  return deps.db.setAssetLocalPath(asset.id, localPath);
 }
 
 /**
  * Generates the master reference image and the default derived variants for a
  * character, downloading each to `<mediaDir>/<identifier>/` and recording an
- * asset row (with the fal request id) per image. Drives the `sheet` status
- * pending → running → done. On failure, marks the step `error` and rethrows,
- * leaving any assets already produced intact.
+ * asset row (with the fal request id) per image. Marks the `sheet` status
+ * running → done (it may re-run from a prior done/error, so it does not assume
+ * "pending"). On failure, marks the step `error` and rethrows, leaving any
+ * assets already produced intact.
  */
 // The master-then-variants flow with its status bookkeeping reads as one linear
 // sequence; splitting it would scatter the try/catch that guards the step status.
@@ -211,6 +226,10 @@ export async function runSheet(
   character: CharacterRecord,
   deps: RunSheetDeps,
 ): Promise<SheetOutcome> {
+  // Never trust a caller-supplied identifier in a file path (defense in depth).
+  if (!isValidIdentifier(character.identifier)) {
+    throw new Error(`Refusing to run sheet for an invalid identifier: "${character.identifier}".`);
+  }
   // The fal queue fires an update on every poll; collapse consecutive identical
   // messages so progress reads as one line per state, not hundreds.
   const sink = deps.onProgress ?? (() => {});
@@ -223,7 +242,7 @@ export async function runSheet(
   const charDir = join(deps.mediaDir, character.identifier);
   mkdirSync(charDir, { recursive: true });
 
-  await updateStep(deps.db, character, "running");
+  await deps.db.setStepState(character.id, "sheet", "running");
   try {
     report("master: generating reference image…");
     const masterPrompt = buildMasterPrompt(character.profile);
@@ -264,11 +283,18 @@ export async function runSheet(
       variants.push(asset);
     }
 
-    await updateStep(deps.db, character, "done");
+    await deps.db.setStepState(character.id, "sheet", "done");
     report("sheet: done");
     return { master, variants };
   } catch (error) {
-    await updateStep(deps.db, character, "error");
+    // The status write must never mask the real failure; report it and rethrow.
+    try {
+      await deps.db.setStepState(character.id, "sheet", "error");
+    } catch (statusError) {
+      report(
+        `warning: could not mark sheet failed: ${statusError instanceof Error ? statusError.message : String(statusError)}`,
+      );
+    }
     throw error;
   }
 }

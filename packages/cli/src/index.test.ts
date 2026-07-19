@@ -1,3 +1,4 @@
+// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -214,10 +215,10 @@ test("create --profile-json with an invalid profile shape exits 1", () => {
   }
 });
 
-test("create --steps with a later-phase step exits 1 with a coming-soon note", () => {
+test("create --steps with a recognized-but-unimplemented step exits 1", () => {
   const res = runCli(["create", "someone", "--steps", "turnaround"]);
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /coming in a later phase/u);
+  assert.match(res.stderr, /recognized but not implemented/u);
 });
 
 test("create --steps with an unknown step exits 1", () => {
@@ -255,10 +256,52 @@ test("create (default steps) with a valid profile but no key creates then fails 
   }
 });
 
+test("create --steps sheet still creates the character (profile step is implicit)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    // No key, so the sheet run fails — but the character must already be created.
+    const res = runCliIn(dir, ["create", "A Night Watchman", "--steps", "sheet"]);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /Created A Night Watchman \(a-night-watchman\)/u);
+    assert.match(res.stderr, /No fal API key found/u);
+    const db = openDatabase(join(dir, "db.sqlite"));
+    try {
+      const character = await db.getCharacter("a-night-watchman");
+      assert.ok(character);
+      assert.equal(character.status.profile, "done");
+      assert.equal(character.status.sheet, "pending");
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("sheet on an unknown character exits 1", () => {
   const res = runCli(["sheet", "ghost"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /No character found/u);
+});
+
+test("sheet on an existing character with no key exits 1 with a setup hint", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const db = openDatabase(join(dir, "db.sqlite"));
+    await db.insertCharacter({
+      identifier: "isolde-keeper",
+      name: "Isolde",
+      profile: { name: "Isolde", identifier: "isolde-keeper" },
+    });
+    db.close();
+    const res = runCliIn(dir, ["sheet", "isolde-keeper"]);
+    assert.equal(res.status, 1);
+    // Character lookup succeeds first, so the failure is specifically the key.
+    assert.match(res.stderr, /No fal API key found/u);
+    assert.match(res.stderr, /setup|doctor/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("sheet without an argument exits 1 with usage", () => {

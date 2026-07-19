@@ -1,3 +1,4 @@
+// oxlint-disable max-lines -- exhaustive offline test file; length is inherent
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -16,8 +17,8 @@ interface GenCall {
 }
 
 /** A scriptable fake ImageGenerator that records calls and can be told to fail
- * a specific call index. */
-function fakeGenerator(options: { failEditIndex?: number } = {}): {
+ * the master generate() or a specific edit index. */
+function fakeGenerator(options: { failEditIndex?: number; failGenerate?: boolean } = {}): {
   generator: ImageGenerator;
   calls: GenCall[];
 } {
@@ -26,6 +27,7 @@ function fakeGenerator(options: { failEditIndex?: number } = {}): {
   const generator: ImageGenerator = {
     generate(input, onProgress): Promise<GeneratedImage> {
       calls.push({ op: "generate", input });
+      if (options.failGenerate) return Promise.reject(new Error("master boom"));
       onProgress?.({ status: "IN_PROGRESS" });
       return Promise.resolve({ requestId: "req-master", url: "https://fal.media/master.png" });
     },
@@ -193,12 +195,32 @@ test("runSheet on a fal failure sets status error and keeps prior assets", async
   }
 });
 
-test("runSheet surfaces a download failure and marks the step error", async () => {
+test("runSheet on a master generate failure records zero assets, status error", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const { generator } = fakeGenerator({ failGenerate: true });
+
+    await assert.rejects(
+      () => runSheet(character, { db, generator, mediaDir, fetchImpl: fakeFetch() }),
+      /master boom/u,
+    );
+
+    assert.deepEqual(await db.getAssets(character.id), []);
+    const refreshed = await db.getCharacter(character.id);
+    assert.equal(refreshed?.status.sheet, "error");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runSheet persists the request_id when the download fails (row survives, path null)", async () => {
   const { db, dir, mediaDir } = setup();
   try {
     const character = await seedCharacter(db);
     const { generator } = fakeGenerator();
-    // The master image URL 404s on download.
+    // The master image generated fine (billed) but its download 404s.
     const fetchImpl = fakeFetch(new Set(["https://fal.media/master.png"]));
 
     await assert.rejects(
@@ -208,11 +230,93 @@ test("runSheet surfaces a download failure and marks the step error", async () =
 
     const refreshed = await db.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "error");
-    assert.deepEqual(await db.getAssets(character.id), []);
+
+    // The row is kept so the billed request_id stays referenceable for publish.
+    const stored = await db.getAssets(character.id);
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0]?.kind, "master");
+    assert.equal(stored[0]?.falRequestId, "req-master");
+    assert.equal(stored[0]?.localPath, null);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("runSheet keeps the failed variant's request_id and the master intact on variant download 404", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const { generator } = fakeGenerator();
+    // Master downloads fine; the first variant (expression) 404s on download.
+    const fetchImpl = fakeFetch(new Set(["https://fal.media/edit-0.png"]));
+
+    await assert.rejects(
+      () => runSheet(character, { db, generator, mediaDir, fetchImpl }),
+      /Failed to download image \(HTTP 404\)/u,
+    );
+
+    const stored = await db.getAssets(character.id);
+    assert.equal(stored.length, 2);
+    const master = stored.find((a) => a.kind === "master");
+    const expression = stored.find((a) => a.kind === "expression");
+    assert.ok(master?.localPath, "master downloaded and has a path");
+    assert.equal(expression?.falRequestId, "req-edit-0");
+    assert.equal(expression?.localPath, null);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runSheet persists the running state before generation begins", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    let stateDuringGenerate: string | undefined;
+    const generator: ImageGenerator = {
+      async generate(): Promise<GeneratedImage> {
+        const refreshed = await db.getCharacter(character.id);
+        stateDuringGenerate = refreshed?.status.sheet;
+        return { requestId: "req-master", url: "https://fal.media/master.png" };
+      },
+      edit(): Promise<GeneratedImage> {
+        return Promise.resolve({ requestId: "req-edit", url: "https://fal.media/edit.png" });
+      },
+    };
+    await runSheet(character, { db, generator, mediaDir, fetchImpl: fakeFetch() });
+    assert.equal(stateDuringGenerate, "running");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runSheet refuses an invalid identifier before any file work", async () => {
+  const { db, dir, mediaDir } = setup();
+  try {
+    const character = await seedCharacter(db);
+    const hostile = { ...character, identifier: "../escape" };
+    const { generator, calls } = fakeGenerator();
+    await assert.rejects(
+      () => runSheet(hostile, { db, generator, mediaDir, fetchImpl: fakeFetch() }),
+      /invalid identifier/u,
+    );
+    assert.equal(calls.length, 0, "no generation attempted for a bad identifier");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("makeFalImageGenerator throws when the response has no image URL", async () => {
+  const fakeClient = {
+    subscribe() {
+      return Promise.resolve({ requestId: "req-x", data: { images: [] } });
+    },
+  } as unknown as Parameters<typeof makeFalImageGenerator>[0];
+  const generator = makeFalImageGenerator(fakeClient);
+  await assert.rejects(() => generator.generate({ prompt: "x" }), /no image URL/u);
 });
 
 test("makeFalImageGenerator maps subscribe results and conforms to the schemas", async () => {

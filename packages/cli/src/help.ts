@@ -23,8 +23,10 @@ Run 'character-gen <command> --help' for command-specific options.
 export const COMMAND_HELP: Record<string, string> = {
   create: `character-gen create "<description>" [--profile-json <file>] [--steps <list>]
   Invent a profile (or take one via --profile-json) and run the pipeline.
-  Steps available now: profile, sheet (default: both). --surprise is handled
-  by the create-character skill.`,
+  Steps available now: profile, sheet (default: both). Creating the character
+  (the profile step) always happens first, so --steps sheet still creates it,
+  then generates the sheet. --surprise is designed for the create-character
+  skill; for now pass --profile-json directly.`,
   list: `character-gen list
   List all locally stored characters.`,
   show: `character-gen show <id|identifier>
