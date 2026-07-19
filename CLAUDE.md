@@ -29,7 +29,7 @@ bun run format:check      # oxfmt --check .
 bun run check             # typecheck + lint + format:check
 ```
 
-No test runner is set up yet.
+Tests run via `bun run test` (node --test over packages/_/src/\**/_.test.ts).
 
 ## Architecture
 
@@ -42,7 +42,7 @@ Bun workspaces monorepo:
 
 Data flow: skills → CLI → fal APIs only. Characters are **project-local and git-committable**: one `characters/<identifier>/` folder per character in the cwd, holding `character.json` (profile, per-step status, embedded asset records with relative media paths) plus the downloaded media. Only the API key lives globally in `~/.character-gen/config.json`; `CHARACTER_GEN_HOME` relocates everything under one dir (tests rely on this). The CLI writes `gallery/` in the cwd (index.html + data.js + media); the gallery page polls by re-injecting `<script src="data.js?t=...">` every 2s and re-renders in place when the `version` field (a content hash) changes — that's the live-refresh trick, since `fetch()` doesn't work on `file://`.
 
-Character pipeline (each step records fal `request_id`s in SQLite; they double as `reference_images` for publish):
+Character pipeline (each step records fal `request_id`s in the character's character.json; they double as `reference_images` for publish):
 
 1. **Profile** — Claude authors the JSON (name, identifier, archetype, visual canon, voice description) in the skill flow and passes `--profile-json`.
 2. **Sheet** — `openai/gpt-image-2` master image; `/edit` for expressions/outfits keeping identity.

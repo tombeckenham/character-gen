@@ -154,7 +154,7 @@ test("regenerated media gets a new content-addressed name, so an open page re-fe
   }
 });
 
-test("writeGallery skips assets with a null local_path (failed downloads)", async () => {
+test("writeGallery skips assets with a null localPath (failed downloads)", async () => {
   const ctx = setup();
   try {
     const character = await seedCharacter(ctx);

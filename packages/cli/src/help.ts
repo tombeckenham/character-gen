@@ -65,5 +65,5 @@ export const COMMAND_HELP: Record<string, string> = {
   setup: `character-gen setup [--api-key <key>]
   Prompt for (or accept) a fal API key, validate it, and store it (0600).`,
   doctor: `character-gen doctor
-  Report Node version, active key source, fal ping, state dir, and DB health.`,
+  Report Node version, active key source, fal ping, config dir, characters dir, and store health.`,
 };

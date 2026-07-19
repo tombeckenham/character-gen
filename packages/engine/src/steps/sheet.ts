@@ -143,7 +143,7 @@ export interface SheetOutcome {
 /**
  * Generates the master reference image and the default derived variants for a
  * character, downloading each to `<charactersDir>/<identifier>/` and recording an
- * asset row (with the fal request id) per image. Marks the `sheet` status
+ * asset record (with the fal request id) per image. Marks the `sheet` status
  * running → done (it may re-run from a prior done/error, so it does not assume
  * "pending"). On failure, marks the step `error` and rethrows, leaving any
  * assets already produced intact.

@@ -26,7 +26,7 @@ import type {
 /** The per-character metadata file inside `characters/<identifier>/`. */
 export const CHARACTER_FILE = "character.json";
 
-/** Thrown by `insertCharacter` when the identifier's folder is already taken. */
+/** Thrown by `insertCharacter` when the identifier's character.json already exists. */
 export class DuplicateIdentifierError extends Error {
   constructor(identifier: string) {
     super(`character folder for identifier "${identifier}" already exists`);

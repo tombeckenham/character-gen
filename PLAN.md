@@ -43,7 +43,7 @@ Each step records fal `request_id`s in the character's `character.json` — they
 
 1. **Profile** — structured JSON: name, identifier (slug), archetype, personality, backstory, visual canon (locked physical description used in every image prompt), voice description. **Claude writes this** in the skill flow (it's the LLM in the room). `--profile-json` lets skills pass the full profile; a `--surprise` mode has the skill roll archetype × era × quirk × flaw first so demo characters are weird and delightful.
 2. **Character sheet** — `openai/gpt-image-2`: master reference image from the visual canon. `openai/gpt-image-2/edit`: expression sheet + outfit variants derived from the master, keeping identity consistent.
-3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`: 8 views at 45° from the master image. Gallery renders a drag-to-scrub pseudo-3D spinner (preloaded frames; drag or scroll to rotate). Stretch: real mesh via `fal-ai/hyper3d/rodin` (v2.5) + `<model-viewer>` GLB orbit.
+3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`: 12 views at 30° from the master image. Gallery renders a drag-to-scrub pseudo-3D spinner (preloaded frames; drag or scroll to rotate). Stretch: real mesh via `fal-ai/hyper3d/rodin` (v2.5) + `<model-viewer>` GLB orbit.
 4. **Voice** — `fal-ai/minimax/voice-design`: turns the voice description into a signature voice sample, stored per character. `bytedance/seed-audio-1.0`: speaks any line using that sample as `@Audio1` reference audio. Every character's voice is derived from who they are.
 5. **Publish** — fal Assets Characters API (see below).
 
@@ -66,7 +66,7 @@ Docs: https://fal.ai/docs/platform-apis/v1/assets/characters/create
 character-gen create "<description>" [--profile-json <file>] [--surprise] [--steps profile,sheet,turnaround,voice]
 character-gen list / show <id|identifier>
 character-gen sheet <char>            # (re)generate master + expressions
-character-gen turnaround <char>       # 8-angle spin frames
+character-gen turnaround <char>       # 12-angle spin frames
 character-gen voice <char>            # design signature voice
 character-gen speak <char> "<line>"   # TTS with the character's voice
 character-gen extract <script-file>   # emits cast JSON for the skill to iterate
@@ -85,7 +85,7 @@ character-gen setup / doctor
 | `create-character`     | Invent profile (or surprise-roll), run full pipeline, open gallery                  |
 | `extract-characters`   | Read a script/screenplay, extract the cast, batch-generate everyone                 |
 | `character-voice`      | Design a voice / make a character speak a line                                      |
-| `character-turnaround` | Generate/refresh the 8-angle spin                                                   |
+| `character-turnaround` | Generate/refresh the 12-angle spin                                                  |
 | `publish-character`    | Push to fal Assets Characters, report the fal character id                          |
 
 ## Data model (folders + JSON)

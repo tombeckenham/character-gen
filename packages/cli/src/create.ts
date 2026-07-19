@@ -80,7 +80,7 @@ function parseSteps(raw: string | undefined): { steps: PipelineStep[] } | { erro
 }
 
 /** Resolves the profile to create from --profile-json or a positional
- * description; uses the DB to make a derived identifier unique. */
+ * description; uses the store to make a derived identifier unique. */
 async function resolveProfile(
   store: CharacterStore,
   profileJsonPath: string | undefined,
@@ -200,7 +200,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
       if (runSheetStep) {
         const ok = await runSheetAndReport(store, character, generators.imageGenerator, paths);
         // A failed sheet leaves nothing for the turnaround to shoot from —
-        // never bill 8 angle generations off a stale (or absent) master.
+        // never bill 12 angle generations off a stale (or absent) master.
         if (!ok) return 1;
       }
       if (tierPasses.length > 0) {

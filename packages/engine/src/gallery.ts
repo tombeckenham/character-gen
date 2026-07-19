@@ -75,7 +75,7 @@ function copyContentAddressed(sourcePath: string, destDir: string): string {
 /**
  * Copies a character's downloadable assets into `<galleryDir>/media/<identifier>/`
  * and returns their gallery-relative entries. Assets without a local file (failed
- * downloads have a null `local_path`, per the sheet step) are skipped; a vanished
+ * downloads have a null `localPath`, per the sheet step) are skipped; a vanished
  * file or a failed copy is skipped with a warning — one bad asset must never
  * abort the whole gallery write.
  */

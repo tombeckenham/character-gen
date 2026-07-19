@@ -79,7 +79,7 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
     );
     return 1;
   }
-  // Flags are validated before any DB/network work so a typo fails fast.
+  // Flags are validated before any store/network work so a typo fails fast.
   const requestedPasses = values["passes"] === undefined ? null : parsePasses(values["passes"]);
   if (requestedPasses && "error" in requestedPasses) {
     err(requestedPasses.error);

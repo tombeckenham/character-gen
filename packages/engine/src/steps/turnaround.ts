@@ -62,7 +62,7 @@ export interface TurnaroundOutcome {
 /**
  * The master image the turnaround shoots from: the newest `master` asset that
  * still has a fal URL (assets are ordered oldest-first). Masters without a URL
- * are skipped by design — a row whose generation was recorded but whose URL
+ * are skipped by design — a record whose generation was recorded but whose URL
  * never landed cannot feed the angle endpoint. Null when the sheet step has
  * not produced a usable one.
  */
@@ -82,7 +82,7 @@ export async function findMasterUrl(
 
 /**
  * Generates the turnaround frames — one image per angle, shot from the master —
- * downloading each to `<charactersDir>/<identifier>/` and recording an asset row
+ * downloading each to `<charactersDir>/<identifier>/` and recording an asset record
  * (kind `angle_<deg>`, with the fal request id) per frame. Marks the
  * `turnaround` status running → done; on failure marks it `error` and rethrows,
  * leaving frames already produced intact. Requires a completed sheet step (a
