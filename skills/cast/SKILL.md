@@ -15,7 +15,7 @@ If `character-gen` is not on PATH, run it from the repo checkout:
 node packages/cli/src/index.ts <command> [args]
 ```
 
-(Requires Node >= 22.13. From anywhere else, use the absolute path to `packages/cli/src/index.ts`.)
+(Requires Node >= 22.18. From anywhere else, use the absolute path to `packages/cli/src/index.ts`.)
 
 ## Command surface
 
@@ -193,19 +193,22 @@ Re-running `character-gen turnaround` on the same character regenerates all 12 f
 
 ## State locations
 
-- `~/.character-gen/db.sqlite` — characters, per-step status, assets (with fal request ids)
-- `~/.character-gen/media/<identifier>/` — downloaded images/audio
-- `~/.character-gen/gallery/` — `index.html` + `data.js` + copied media; open via `file://`
-- `~/.character-gen/config.json` — stored API key (mode 0600)
+Characters are project-local so they can be committed to git; run the CLI from
+the project directory you want them in.
+
+- `./characters/<identifier>/` — `character.json` (profile, per-step status, assets with fal request ids) + downloaded images/audio, one committable folder per character
+- `./gallery/` — `index.html` + `data.js` + copied media; open via `file://` (derived output — gitignore it if you like)
+- `~/.character-gen/config.json` — stored API key (mode 0600; never lands in the project)
+- Setting `CHARACTER_GEN_HOME` relocates all of the above under one directory (tests / an intentionally global library)
 
 ## Errors and troubleshooting
 
 Run `character-gen doctor` whenever a command fails. It reports:
 
-- **node**: needs >= 22.13 (the built-in `node:sqlite` driver).
+- **node**: needs >= 22.18 (runs TypeScript directly via Node type stripping).
 - **key**: which source resolved. "none found" → run `character-gen setup` or export `FAL_KEY`.
 - **fal ping**: a 401 with the key coming from genmedia usually means genmedia stored the key **encrypted** on that machine — the raw value is unusable. Fix: `character-gen setup` with a real key from fal.ai.
-- **db**: SQLite health under `~/.character-gen`.
+- **store**: whether the `./characters/` folders read cleanly.
 
 Common failures:
 

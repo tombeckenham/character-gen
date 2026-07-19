@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { ensureStateDirs, openDatabase, statePaths, writeGallery } from "@character-gen/engine";
+import { ensureStateDirs, openStore, statePaths, writeGallery } from "@character-gen/engine";
 import type { GalleryWriteResult } from "@character-gen/engine";
 import { COMMAND_HELP } from "./help.ts";
 import { err, out, wantsHelp } from "./io.ts";
@@ -50,11 +50,11 @@ export async function cmdOpen(rest: string[], deps: OpenDeps = {}): Promise<numb
 
   const paths = statePaths(deps.env ?? process.env);
   ensureStateDirs(paths, ["root"]);
-  const db = openDatabase(paths.dbFile);
+  const store = openStore(paths.charactersDir);
   let result: GalleryWriteResult;
   try {
     result = await writeGallery({
-      db,
+      store,
       galleryDir: paths.galleryDir,
       onWarn: err,
       ...(deps.spaHtmlPath === undefined ? {} : { spaHtmlPath: deps.spaHtmlPath }),
@@ -63,7 +63,7 @@ export async function cmdOpen(rest: string[], deps: OpenDeps = {}): Promise<numb
     err(error instanceof Error ? error.message : String(error));
     return 1;
   } finally {
-    db.close();
+    store.close();
   }
 
   const url = pathToFileURL(result.indexHtml).href;

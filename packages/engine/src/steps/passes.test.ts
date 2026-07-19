@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../db/index.ts";
-import type { Database } from "../db/index.ts";
+import { openStore } from "../store/index.ts";
+import type { CharacterStore } from "../store/index.ts";
 import type { AssetRecord, CharacterRecord } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
 import { runSheetPasses, selectDetailSubjects } from "./passes.ts";
@@ -41,14 +41,14 @@ const fakeFetch: FetchImpl = (() =>
     new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200 }),
   )) as unknown as FetchImpl;
 
-function setup(): { db: Database; dir: string; mediaDir: string } {
+function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-passes-"));
-  return { db: openDatabase(join(dir, "db.sqlite")), dir, mediaDir: join(dir, "media") };
+  return { store: openStore(join(dir, "characters")), dir, charactersDir: join(dir, "characters") };
 }
 
 /** Seeds a rich character WITH a stored master (passes edit from its URL). */
-async function seedWithMaster(db: Database): Promise<CharacterRecord> {
-  const character = await db.insertCharacter({
+async function seedWithMaster(store: CharacterStore): Promise<CharacterRecord> {
+  const character = await store.insertCharacter({
     identifier: "aldous-grey",
     name: "Aldous",
     profile: {
@@ -60,7 +60,7 @@ async function seedWithMaster(db: Database): Promise<CharacterRecord> {
       expressions: ["weathered joy", "cold fury"],
     },
   });
-  await db.insertAsset({
+  await store.insertAsset({
     characterId: character.id,
     kind: "master",
     falRequestId: "req-master",
@@ -95,16 +95,16 @@ test("selectDetailSubjects: hands first, then imperfections, then props, capped"
 
 // oxlint-disable-next-line max-lines-per-function
 test("runSheetPasses runs the rich tier: face triptych + named expressions + details", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seedWithMaster(db);
+    const character = await seedWithMaster(store);
     const { generator, edits } = fakeEditor();
     const seen: AssetRecord[] = [];
 
     const outcome = await runSheetPasses(character, {
-      db,
+      store,
       generator,
-      mediaDir,
+      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["face", "expressions", "details"],
       detailCap: 2,
@@ -146,24 +146,24 @@ test("runSheetPasses runs the rich tier: face triptych + named expressions + det
     assert.ok(outcome.assets.every((asset) => asset.localPath && existsSync(asset.localPath)));
     assert.equal(seen.length, 7);
     // The sheet step rolled up to done.
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "done");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSheetPasses runs passes independently (scale alone) in canonical order", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seedWithMaster(db);
+    const character = await seedWithMaster(store);
     const { generator, edits } = fakeEditor();
     // Requested out of canonical order; scale still runs last.
     const outcome = await runSheetPasses(character, {
-      db,
+      store,
       generator,
-      mediaDir,
+      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["scale", "face"],
     });
@@ -173,24 +173,24 @@ test("runSheetPasses runs passes independently (scale alone) in canonical order"
     );
     assert.equal(edits.length, 4);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSheetPasses money-guard: a failing shot aborts everything after it", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seedWithMaster(db);
+    const character = await seedWithMaster(store);
     // Fail the last face shot; expressions/details must never generate.
     const { generator, edits } = fakeEditor({ failEditIndex: 2 });
 
     await assert.rejects(
       () =>
         runSheetPasses(character, {
-          db,
+          store,
           generator,
-          mediaDir,
+          charactersDir,
           fetchImpl: fakeFetch,
           passes: ["face", "expressions", "details"],
         }),
@@ -199,23 +199,23 @@ test("runSheetPasses money-guard: a failing shot aborts everything after it", as
 
     assert.equal(edits.length, 3, "no shot ran past the failure");
     // The two completed faces survive; the step is marked error.
-    const stored = await db.getAssets(character.id);
+    const stored = await store.getAssets(character.id);
     assert.deepEqual(
       stored.map((asset) => asset.kind),
       ["master", "face_front", "face_three_quarter"],
     );
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "error");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSheetPasses without a master refuses before spending anything", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await db.insertCharacter({
+    const character = await store.insertCharacter({
       identifier: "no-master",
       name: "Nobody",
       profile: { name: "Nobody", identifier: "no-master" },
@@ -224,9 +224,9 @@ test("runSheetPasses without a master refuses before spending anything", async (
     await assert.rejects(
       () =>
         runSheetPasses(character, {
-          db,
+          store,
           generator,
-          mediaDir,
+          charactersDir,
           fetchImpl: fakeFetch,
           passes: ["face"],
         }),
@@ -234,24 +234,24 @@ test("runSheetPasses without a master refuses before spending anything", async (
     );
     assert.equal(edits.length, 0);
     // The status was not touched — the guard fires before withStepStatus.
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "pending");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSheetPasses survives a throwing onAsset sink", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seedWithMaster(db);
+    const character = await seedWithMaster(store);
     const { generator } = fakeEditor();
     const warnings: string[] = [];
     const outcome = await runSheetPasses(character, {
-      db,
+      store,
       generator,
-      mediaDir,
+      charactersDir,
       fetchImpl: fakeFetch,
       passes: ["scale"],
       onProgress: (message) => warnings.push(message),
@@ -261,10 +261,10 @@ test("runSheetPasses survives a throwing onAsset sink", async () => {
     });
     assert.equal(outcome.assets.length, 1);
     assert.ok(warnings.some((message) => message.includes("asset notification failed")));
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "done");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

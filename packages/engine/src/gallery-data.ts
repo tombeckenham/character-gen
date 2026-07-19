@@ -2,7 +2,7 @@
 // plus the pure poll/re-render logic the SPA runs every tick. This module is
 // bundled into the browser build via the `@character-gen/engine/gallery-data`
 // subpath export, so it must stay free of node imports (and of the engine
-// barrel, which links node:sqlite).
+// barrel, which links node modules).
 import { ASSET_KINDS, PIPELINE_STEPS, STEP_STATES } from "./types.ts";
 import type { AssetKind, CharacterStatus, StepState } from "./types.ts";
 
@@ -90,7 +90,8 @@ export interface GalleryCharacter {
 }
 
 export interface GalleryData {
-  /** Strictly increases on every writer run; the page re-renders on change. */
+  /** A positive-integer digest of the payload content — changes exactly when
+   * the content changes; the page re-renders on change. */
   version: number;
   characters: GalleryCharacter[];
 }
@@ -171,7 +172,7 @@ export function parseGalleryData(raw: unknown): GalleryData | null {
   if (raw === null || typeof raw !== "object") return null;
   const source = raw as Record<string, unknown>;
   const version = source["version"];
-  // The writer's version counter only ever emits positive integers; anything
+  // The writer's version digest only ever emits positive integers; anything
   // else is a corrupt/foreign payload.
   if (typeof version !== "number" || !Number.isInteger(version) || version < 1) return null;
   if (!Array.isArray(source["characters"])) return null;
@@ -197,10 +198,10 @@ export interface PollOutcome {
  * One poll tick, as a pure function: given the currently rendered data and the
  * freshly loaded `window.CHARGEN_DATA` value, decide whether to re-render. An
  * unparseable payload (file missing or mid-write) keeps the current data. Any
- * version different from the current one re-renders — including a lower one,
- * so a writer whose counter was reset un-freezes an open page. An unchanged
- * `version` keeps the current object identity, making a state set with it a
- * no-op.
+ * version different from the current one re-renders — the version is a content
+ * digest, not a counter, so "different" is the only meaningful comparison. An
+ * unchanged `version` keeps the current object identity, making a state set
+ * with it a no-op.
  */
 export function reduceGalleryPoll(current: GalleryData | null, raw: unknown): PollOutcome {
   const incoming = parseGalleryData(raw);

@@ -1,12 +1,13 @@
-import { openDatabase } from "./db/index.ts";
+import { openStore } from "./store/index.ts";
 import { resolveFalKey } from "./key.ts";
 import { pingFal } from "./fal.ts";
-import { ensureStateDirs, statePaths } from "./paths.ts";
+import { statePaths } from "./paths.ts";
 import type { FetchImpl, PingResult } from "./fal.ts";
 import type { KeySource } from "./types.ts";
 
-/** Minimum Node version for the built-in `node:sqlite` driver. */
-export const MIN_NODE = { major: 22, minor: 13 } as const;
+/** Minimum Node version: the CLI's `bin` runs `src/index.ts` directly, which
+ * needs Node's unflagged type stripping (22.18+/23.6+). */
+export const MIN_NODE = { major: 22, minor: 18 } as const;
 
 export function nodeVersionOk(version: string = process.versions.node): boolean {
   const match = /^(\d+)\.(\d+)/u.exec(version);
@@ -23,8 +24,10 @@ export interface DoctorReport {
   keySource: KeySource | null;
   ping: PingResult | null;
   stateDir: string;
-  dbOk: boolean;
-  dbError: string | null;
+  /** The character folders root the store would read/write. */
+  charactersDir: string;
+  storeOk: boolean;
+  storeError: string | null;
   healthy: boolean;
   /** Actionable remediation hint when the failure has a known cause. */
   hint: string | null;
@@ -51,8 +54,8 @@ export interface DoctorOptions {
 
 /**
  * Gathers the doctor report: Node version, active key source, fal ping, state
- * dir path, and DB reachability. `healthy` is true only when Node is new enough,
- * a key resolved and pinged OK, and the DB opened.
+ * dir path, and character-store readability. `healthy` is true only when Node
+ * is new enough, a key resolved and pinged OK, and the store read cleanly.
  */
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorReport> {
   const env = options.env ?? process.env;
@@ -71,22 +74,23 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     ping = await pingFal(key.key, options.fetchImpl ? { fetchImpl: options.fetchImpl } : {});
   }
 
-  let dbOk = false;
-  let dbError: string | null = null;
+  let storeOk = false;
+  let storeError: string | null = null;
   try {
-    ensureStateDirs(paths, ["root"]);
-    const db = openDatabase(paths.dbFile);
+    // A missing charactersDir reads as an empty store — the doctor must not
+    // create folders in the user's cwd just by being run.
+    const store = openStore(paths.charactersDir);
     try {
-      await db.listCharacters();
-      dbOk = true;
+      await store.listCharacters();
+      storeOk = true;
     } finally {
-      db.close();
+      store.close();
     }
   } catch (err) {
-    dbError = err instanceof Error ? err.message : String(err);
+    storeError = err instanceof Error ? err.message : String(err);
   }
 
-  const healthy = nodeOk && key.ok && ping !== null && ping.ok && dbOk;
+  const healthy = nodeOk && key.ok && ping !== null && ping.ok && storeOk;
   const keySource = key.ok ? key.source : null;
 
   return {
@@ -95,8 +99,9 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     keySource,
     ping,
     stateDir: paths.root,
-    dbOk,
-    dbError,
+    charactersDir: paths.charactersDir,
+    storeOk,
+    storeError,
     healthy,
     hint: doctorHint(keySource, ping),
   };

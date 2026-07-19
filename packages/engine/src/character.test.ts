@@ -4,19 +4,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "./db/index.ts";
-import {
-  createCharacter,
-  deriveMinimalProfile,
-  isUniqueConstraintError,
-  isValidIdentifier,
-  slugify,
-  validateProfile,
-} from "./character.ts";
+import { DuplicateIdentifierError, openStore } from "./store/index.ts";
+import { isValidIdentifier } from "./types.ts";
+import { createCharacter, deriveMinimalProfile, slugify, validateProfile } from "./character.ts";
 
-function tmpDb(): { db: ReturnType<typeof openDatabase>; dir: string } {
+function tmpStore(): { store: ReturnType<typeof openStore>; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-char-"));
-  return { db: openDatabase(join(dir, "db.sqlite")), dir };
+  return { store: openStore(join(dir, "characters")), dir };
 }
 
 test("validateProfile accepts a minimal valid profile and returns it typed", () => {
@@ -159,46 +153,39 @@ test("slugify returns empty string for input with no slug-able characters", () =
 });
 
 test("createCharacter persists the profile and marks the profile step done", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
-    const character = await createCharacter(db, { name: "Isolde", identifier: "isolde-keeper" });
+    const character = await createCharacter(store, { name: "Isolde", identifier: "isolde-keeper" });
     assert.equal(character.identifier, "isolde-keeper");
     assert.equal(character.status.profile, "done");
     assert.equal(character.status.sheet, "pending");
-    const fetched = await db.getCharacter("isolde-keeper");
+    const fetched = await store.getCharacter("isolde-keeper");
     assert.ok(fetched);
     assert.equal(fetched.name, "Isolde");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("createCharacter maps a duplicate identifier to a friendly error", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
-    await createCharacter(db, { name: "Isolde", identifier: "isolde-keeper" });
+    await createCharacter(store, { name: "Isolde", identifier: "isolde-keeper" });
     await assert.rejects(
-      () => createCharacter(db, { name: "Clone", identifier: "isolde-keeper" }),
+      () => createCharacter(store, { name: "Clone", identifier: "isolde-keeper" }),
       (err: unknown) => {
         assert.ok(err instanceof Error);
         assert.match(err.message, /already exists/u);
-        // The raw SQLITE text is not surfaced to the user, but is preserved as cause.
-        assert.doesNotMatch(err.message, /UNIQUE constraint/u);
-        assert.ok(isUniqueConstraintError(err.cause));
+        // The store's raw folder-exists error is not surfaced, but kept as cause.
+        assert.ok(err.cause instanceof DuplicateIdentifierError);
         return true;
       },
     );
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test("isUniqueConstraintError is false for unrelated errors", () => {
-  assert.equal(isUniqueConstraintError(new Error("boom")), false);
-  assert.equal(isUniqueConstraintError("not an error"), false);
-  assert.equal(isUniqueConstraintError(null), false);
 });
 
 test("validateProfile rejects path-traversal identifiers", () => {
@@ -223,100 +210,100 @@ test("isValidIdentifier accepts slugs and rejects traversal/oversize", () => {
 });
 
 test("deriveMinimalProfile builds a valid profile and stores the description", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
-    const profile = await deriveMinimalProfile(db, "A Lighthouse Keeper");
+    const profile = await deriveMinimalProfile(store, "A Lighthouse Keeper");
     assert.equal(profile.name, "A Lighthouse Keeper");
     assert.equal(profile.identifier, "a-lighthouse-keeper");
     assert.equal(profile["description"], "A Lighthouse Keeper");
     // It funnels through validateProfile, so the identifier is a valid slug.
     assert.ok(isValidIdentifier(profile.identifier));
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("deriveMinimalProfile truncates a long name with an ellipsis", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
     const long = "Detective ".repeat(20).trim();
-    const profile = await deriveMinimalProfile(db, long);
+    const profile = await deriveMinimalProfile(store, long);
     assert.ok(profile.name.length <= 60);
     assert.match(profile.name, /…$/u);
     assert.ok(isValidIdentifier(profile.identifier));
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("deriveMinimalProfile suffixes on collision and walks -2 → -3", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
-    await db.insertCharacter({
+    await store.insertCharacter({
       identifier: "a-lighthouse-keeper",
       name: "One",
       profile: { name: "One", identifier: "a-lighthouse-keeper" },
     });
-    const second = await deriveMinimalProfile(db, "A Lighthouse Keeper");
+    const second = await deriveMinimalProfile(store, "A Lighthouse Keeper");
     assert.equal(second.identifier, "a-lighthouse-keeper-2");
-    await db.insertCharacter({
+    await store.insertCharacter({
       identifier: second.identifier,
       name: "Two",
       profile: { name: "Two", identifier: second.identifier },
     });
-    const third = await deriveMinimalProfile(db, "A Lighthouse Keeper");
+    const third = await deriveMinimalProfile(store, "A Lighthouse Keeper");
     assert.equal(third.identifier, "a-lighthouse-keeper-3");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("deriveMinimalProfile terminates for a taken 64-char slug (no hang)", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
     // A description whose slug is exactly 64 chars, already taken.
     const base = "a".repeat(64);
     const description = "a".repeat(64);
-    await db.insertCharacter({
+    await store.insertCharacter({
       identifier: base,
       name: "Existing",
       profile: { name: "Existing", identifier: base },
     });
-    const derived = await deriveMinimalProfile(db, description);
+    const derived = await deriveMinimalProfile(store, description);
     assert.notEqual(derived.identifier, base);
     assert.ok(isValidIdentifier(derived.identifier), derived.identifier);
     assert.ok(derived.identifier.length <= 64);
     // Stem truncated to make room for the suffix; ends in the numeric marker.
     assert.match(derived.identifier, /-2$/u);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("deriveMinimalProfile keeps an exactly-64 free slug unchanged", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
     const description = "a".repeat(64);
-    const derived = await deriveMinimalProfile(db, description);
+    const derived = await deriveMinimalProfile(store, description);
     assert.equal(derived.identifier, "a".repeat(64));
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("deriveMinimalProfile falls back to 'character' for slug-less input", async () => {
-  const { db, dir } = tmpDb();
+  const { store, dir } = tmpStore();
   try {
-    const derived = await deriveMinimalProfile(db, "日本語 🎭");
+    const derived = await deriveMinimalProfile(store, "日本語 🎭");
     assert.equal(derived.identifier, "character");
     assert.equal(derived.name, "日本語 🎭");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

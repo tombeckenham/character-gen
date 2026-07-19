@@ -67,10 +67,10 @@ export interface TurnaroundOutcome {
  * not produced a usable one.
  */
 export async function findMasterUrl(
-  db: StepMediaDeps["db"],
+  store: StepMediaDeps["store"],
   characterId: string,
 ): Promise<string | null> {
-  const assets = await db.getAssets(characterId);
+  const assets = await store.getAssets(characterId);
   for (let i = assets.length - 1; i >= 0; i -= 1) {
     const asset = assets[i];
     if (asset && asset.kind === "master" && asset.url !== null && asset.url.length > 0) {
@@ -82,7 +82,7 @@ export async function findMasterUrl(
 
 /**
  * Generates the turnaround frames — one image per angle, shot from the master —
- * downloading each to `<mediaDir>/<identifier>/` and recording an asset row
+ * downloading each to `<charactersDir>/<identifier>/` and recording an asset row
  * (kind `angle_<deg>`, with the fal request id) per frame. Marks the
  * `turnaround` status running → done; on failure marks it `error` and rethrows,
  * leaving frames already produced intact. Requires a completed sheet step (a
@@ -96,17 +96,17 @@ export async function runTurnaround(
   deps: RunTurnaroundDeps,
 ): Promise<TurnaroundOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.mediaDir, "turnaround");
+  const charDir = ensureCharacterMediaDir(character, deps.charactersDir, "turnaround");
   const angles = deps.angles ?? TURNAROUND_ANGLES;
 
-  const masterUrl = await findMasterUrl(deps.db, character.id);
+  const masterUrl = await findMasterUrl(deps.store, character.id);
   if (masterUrl === null) {
     throw new Error(
       `No master image found for "${character.identifier}" — run \`character-gen sheet ${character.identifier}\` first.`,
     );
   }
 
-  return withStepStatus(deps.db, character.id, "turnaround", report, async () => {
+  return withStepStatus(deps.store, character.id, "turnaround", report, async () => {
     const frames: AssetRecord[] = [];
     for (const angle of angles) {
       report(`angle ${angle}°: generating…`);

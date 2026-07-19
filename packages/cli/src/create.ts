@@ -8,7 +8,7 @@ import {
   IMPLEMENTED_STEPS,
   makeFalAngleGenerator,
   makeFalImageGenerator,
-  openDatabase,
+  openStore,
   PIPELINE_STEPS,
   statePaths,
   validateProfile,
@@ -17,7 +17,7 @@ import type {
   AngleGenerator,
   CharacterProfile,
   CharacterRecord,
-  Database,
+  CharacterStore,
   ImageGenerator,
   PipelineStep,
 } from "@character-gen/engine";
@@ -82,7 +82,7 @@ function parseSteps(raw: string | undefined): { steps: PipelineStep[] } | { erro
 /** Resolves the profile to create from --profile-json or a positional
  * description; uses the DB to make a derived identifier unique. */
 async function resolveProfile(
-  db: Database,
+  store: CharacterStore,
   profileJsonPath: string | undefined,
   description: string | undefined,
 ): Promise<{ profile: CharacterProfile } | { error: string }> {
@@ -100,7 +100,7 @@ async function resolveProfile(
       error: 'Usage: character-gen create "<description>" [--profile-json <file>] [--steps <list>]',
     };
   }
-  return { profile: await deriveMinimalProfile(db, description) };
+  return { profile: await deriveMinimalProfile(store, description) };
 }
 
 export interface CreateDeps {
@@ -172,10 +172,10 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
   }
 
   const paths = statePaths(deps.env ?? process.env);
-  ensureStateDirs(paths, ["root", "mediaDir"]);
-  const db = openDatabase(paths.dbFile);
+  ensureStateDirs(paths, ["root"]);
+  const store = openStore(paths.charactersDir);
   try {
-    const resolved = await resolveProfile(db, values["profile-json"], positionals[0]);
+    const resolved = await resolveProfile(store, values["profile-json"], positionals[0]);
     if ("error" in resolved) {
       err(resolved.error);
       return 1;
@@ -183,13 +183,13 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
 
     let character: CharacterRecord;
     try {
-      character = await createCharacter(db, resolved.profile);
+      character = await createCharacter(store, resolved.profile);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
       return 1;
     }
     out(`Created ${character.name} (${character.identifier}).`);
-    await refreshGallery(db, paths);
+    await refreshGallery(store, paths);
 
     if (runSheetStep || runTurnaroundStep) {
       const generators = resolveGenerators(deps);
@@ -198,7 +198,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
         return 1;
       }
       if (runSheetStep) {
-        const ok = await runSheetAndReport(db, character, generators.imageGenerator, paths);
+        const ok = await runSheetAndReport(store, character, generators.imageGenerator, paths);
         // A failed sheet leaves nothing for the turnaround to shoot from —
         // never bill 8 angle generations off a stale (or absent) master.
         if (!ok) return 1;
@@ -206,7 +206,7 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
       if (tierPasses.length > 0) {
         // Same money-guard: a failed pass stops the run before the turnaround.
         const ok = await runSheetPassesAndReport(
-          db,
+          store,
           character,
           generators.imageGenerator,
           paths,
@@ -216,12 +216,12 @@ export async function cmdCreate(rest: string[], deps: CreateDeps = {}): Promise<
         if (!ok) return 1;
       }
       if (runTurnaroundStep) {
-        const ok = await runTurnaroundAndReport(db, character, generators.angleGenerator, paths);
+        const ok = await runTurnaroundAndReport(store, character, generators.angleGenerator, paths);
         if (!ok) return 1;
       }
     }
     return 0;
   } finally {
-    db.close();
+    store.close();
   }
 }

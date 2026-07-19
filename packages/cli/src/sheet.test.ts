@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { openDatabase, parseGalleryData } from "@character-gen/engine";
+import { openStore, parseGalleryData } from "@character-gen/engine";
 import type { ImageGenerator } from "@character-gen/engine";
 import { cmdSheet } from "./sheet-cmd.ts";
 
@@ -17,13 +17,13 @@ const failingGenerator: ImageGenerator = {
 test("sheet --tier rich money-guard: a failed core sheet runs zero passes", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-sheet-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    db.close();
+    store.close();
     let edits = 0;
     const generator: ImageGenerator = {
       generate: () => Promise.reject(new Error("master boom")),
@@ -46,20 +46,20 @@ test("sheet --tier rich money-guard: a failed core sheet runs zero passes", asyn
 test("sheet --passes face reruns just that pass off the existing master", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-sheet-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    const character = await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    const character = await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
     const pngData = "data:image/png;base64,iVBORw0KGgo=";
-    await db.insertAsset({
+    await store.insertAsset({
       characterId: character.id,
       kind: "master",
       falRequestId: "req-master",
       url: pngData,
     });
-    db.close();
+    store.close();
     let generates = 0;
     const editPrompts: string[] = [];
     const generator: ImageGenerator = {
@@ -79,7 +79,7 @@ test("sheet --passes face reruns just that pass off the existing master", async 
     assert.equal(code, 0);
     assert.equal(generates, 0, "--passes never regenerates the core sheet");
     assert.equal(editPrompts.length, 3, "the face pass is exactly the triptych");
-    const reopened = openDatabase(join(dir, "db.sqlite"));
+    const reopened = openStore(join(dir, "characters"));
     try {
       const assets = await reopened.getAssets(character.id);
       assert.deepEqual(
@@ -112,13 +112,13 @@ test("sheet rejects --tier with --passes, unknown tiers, and unknown passes", as
 test("a failed sheet run flips the step to error in a live gallery's data.js", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-sheet-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    db.close();
+    store.close();
     // A previously opened gallery (index.html present so no dist is needed).
     const galleryDir = join(dir, "gallery");
     mkdirSync(galleryDir, { recursive: true });

@@ -4,3 +4,6 @@ dist/
 .env
 *.local
 .DS_Store
+
+# character-gen derived output (characters/ is committable by choice)
+/gallery/

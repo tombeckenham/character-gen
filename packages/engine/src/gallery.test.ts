@@ -15,8 +15,8 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { openDatabase } from "./db/index.ts";
-import type { Database } from "./db/index.ts";
+import { openStore } from "./store/index.ts";
+import type { CharacterStore } from "./store/index.ts";
 import type { CharacterRecord } from "./types.ts";
 import { GALLERY_NOT_BUILT, refreshGalleryIfPresent, writeGallery } from "./gallery.ts";
 import type { GalleryWriteDeps } from "./gallery.ts";
@@ -32,7 +32,7 @@ function hashedName(stem: string, bytes: Buffer, ext = ".png"): string {
 
 interface Ctx {
   dir: string;
-  db: Database;
+  store: CharacterStore;
   galleryDir: string;
   spaHtmlPath: string;
   warnings: string[];
@@ -44,7 +44,7 @@ function setup(): Ctx {
   writeFileSync(spaHtmlPath, "<!doctype html><title>spa</title>");
   return {
     dir,
-    db: openDatabase(join(dir, "db.sqlite")),
+    store: openStore(join(dir, "characters")),
     galleryDir: join(dir, "gallery"),
     spaHtmlPath,
     warnings: [],
@@ -54,7 +54,7 @@ function setup(): Ctx {
 /** Standard writer deps for `ctx`, collecting warnings into `ctx.warnings`. */
 function deps(ctx: Ctx, overrides: Partial<GalleryWriteDeps> = {}): GalleryWriteDeps {
   return {
-    db: ctx.db,
+    store: ctx.store,
     galleryDir: ctx.galleryDir,
     spaHtmlPath: ctx.spaHtmlPath,
     onWarn: (message) => ctx.warnings.push(message),
@@ -63,13 +63,13 @@ function deps(ctx: Ctx, overrides: Partial<GalleryWriteDeps> = {}): GalleryWrite
 }
 
 function teardown(ctx: Ctx): void {
-  ctx.db.close();
+  ctx.store.close();
   rmSync(ctx.dir, { recursive: true, force: true });
 }
 
 /** Seeds a character with a downloaded master and returns it. */
 async function seedCharacter(ctx: Ctx, identifier = "isolde-keeper"): Promise<CharacterRecord> {
-  const character = await ctx.db.insertCharacter({
+  const character = await ctx.store.insertCharacter({
     identifier,
     name: "Isolde",
     profile: {
@@ -83,7 +83,7 @@ async function seedCharacter(ctx: Ctx, identifier = "isolde-keeper"): Promise<Ch
   mkdirSync(mediaDir, { recursive: true });
   const file = join(mediaDir, "master-1.png");
   writeFileSync(file, MASTER_BYTES);
-  await ctx.db.insertAsset({
+  await ctx.store.insertAsset({
     characterId: character.id,
     kind: "master",
     falRequestId: "req-master",
@@ -115,8 +115,8 @@ test("writeGallery writes index.html, media copies, and a parseable data.js", as
     assert.ok(existsSync(join(ctx.galleryDir, "media", "isolde-keeper", masterName)));
 
     const data = readDataJs(ctx.galleryDir);
-    assert.equal(data.version, 1);
-    assert.equal(result.version, 1);
+    assert.equal(data.version, result.version);
+    assert.ok(Number.isInteger(data.version) && data.version >= 1);
     const character = data.characters[0];
     assert.ok(character);
     assert.equal(character.identifier, "isolde-keeper");
@@ -158,7 +158,7 @@ test("writeGallery skips assets with a null local_path (failed downloads)", asyn
   const ctx = setup();
   try {
     const character = await seedCharacter(ctx);
-    await ctx.db.insertAsset({
+    await ctx.store.insertAsset({
       characterId: character.id,
       kind: "expression",
       falRequestId: "req-expr",
@@ -181,7 +181,7 @@ test("writeGallery skips (with a warning) assets whose local file vanished", asy
   try {
     const character = await seedCharacter(ctx);
     const ghost = join(ctx.dir, "media", "isolde-keeper", "gone.png");
-    await ctx.db.insertAsset({ characterId: character.id, kind: "outfit", localPath: ghost });
+    await ctx.store.insertAsset({ characterId: character.id, kind: "outfit", localPath: ghost });
     await writeGallery(deps(ctx));
     const data = readDataJs(ctx.galleryDir);
     assert.deepEqual(
@@ -202,7 +202,11 @@ test("a failing media copy warns and skips that asset, not the whole write", asy
     // A directory where a file should be: existsSync passes, reading throws.
     const bogus = join(ctx.dir, "media", "isolde-keeper", "not-a-file.png");
     mkdirSync(bogus, { recursive: true });
-    await ctx.db.insertAsset({ characterId: character.id, kind: "expression", localPath: bogus });
+    await ctx.store.insertAsset({
+      characterId: character.id,
+      kind: "expression",
+      localPath: bogus,
+    });
 
     await writeGallery(deps(ctx));
     const data = readDataJs(ctx.galleryDir);
@@ -217,47 +221,26 @@ test("a failing media copy warns and skips that asset, not the whole write", asy
   }
 });
 
-test("version strictly increases across runs and across database reopens", async () => {
+test("version is a content digest: stable for equal content, new for changed content", async () => {
   const ctx = setup();
   try {
     await seedCharacter(ctx);
     const first = await writeGallery(deps(ctx));
+    // Unchanged content must not move the version (the page skips a re-render).
     const second = await writeGallery(deps(ctx));
-    assert.equal(first.version, 1);
-    assert.equal(second.version, 2);
+    assert.equal(second.version, first.version);
 
-    // A separate CLI invocation = a fresh database handle.
-    ctx.db.close();
-    ctx.db = openDatabase(join(ctx.dir, "db.sqlite"));
+    // A separate CLI invocation = a fresh store handle over the same folders.
+    ctx.store.close();
+    ctx.store = openStore(join(ctx.dir, "characters"));
     const third = await writeGallery(deps(ctx));
-    assert.equal(third.version, 3);
-    assert.equal(readDataJs(ctx.galleryDir).version, 3);
-  } finally {
-    teardown(ctx);
-  }
-});
+    assert.equal(third.version, first.version);
 
-test("interleaved bumps on separate db handles always mint distinct versions", async () => {
-  const ctx = setup();
-  try {
-    // Two handles on the same file simulate two concurrent CLI processes; the
-    // single-statement upsert serializes the bumps even though neither handle
-    // sees the other's in-memory state.
-    const other = openDatabase(join(ctx.dir, "db.sqlite"));
-    try {
-      const versions: number[] = [];
-      for (let round = 0; round < 3; round += 1) {
-        // Deliberately interleaved and sequential — the ordering is the test.
-        // oxlint-disable-next-line no-await-in-loop
-        const mine = await ctx.db.bumpCounter("gallery_version");
-        // oxlint-disable-next-line no-await-in-loop
-        const theirs = await other.bumpCounter("gallery_version");
-        versions.push(mine, theirs);
-      }
-      assert.deepEqual(versions, [1, 2, 3, 4, 5, 6]);
-    } finally {
-      other.close();
-    }
+    // New content (a second character) must mint a different version.
+    await seedCharacter(ctx, "aldous-grey");
+    const fourth = await writeGallery(deps(ctx));
+    assert.notEqual(fourth.version, first.version);
+    assert.equal(readDataJs(ctx.galleryDir).version, fourth.version);
   } finally {
     teardown(ctx);
   }
@@ -272,7 +255,7 @@ test("data.js is written atomically: replaced in place, no tmp files left over",
     await writeGallery(deps(ctx));
     // The stale file was replaced wholesale (rename, not append/truncate)...
     const data = readDataJs(ctx.galleryDir);
-    assert.equal(data.version, 1);
+    assert.equal(data.characters.length, 1);
     // ...and no temp artifacts remain for the polling page to trip over.
     const leftovers = readdirSync(ctx.galleryDir).filter((name) => name.includes(".tmp"));
     assert.deepEqual(leftovers, []);
@@ -326,7 +309,7 @@ test("writeGallery keeps an existing index.html when the built SPA is missing", 
       deps(ctx, { spaHtmlPath: join(ctx.dir, "no-such-dist.html") }),
     );
     assert.equal(readFileSync(result.indexHtml, "utf8"), "<!doctype html><title>previous</title>");
-    assert.equal(readDataJs(ctx.galleryDir).version, 1);
+    assert.equal(readDataJs(ctx.galleryDir).version, result.version);
   } finally {
     teardown(ctx);
   }
@@ -343,13 +326,14 @@ test("refreshGalleryIfPresent is a no-op when the gallery was never opened", asy
   }
 });
 
-test("refreshGalleryIfPresent rewrites an existing gallery", async () => {
+test("refreshGalleryIfPresent rewrites an existing gallery with the new content", async () => {
   const ctx = setup();
   try {
     await seedCharacter(ctx);
     await writeGallery(deps(ctx));
+    await seedCharacter(ctx, "aldous-grey");
     await refreshGalleryIfPresent(deps(ctx));
-    assert.equal(readDataJs(ctx.galleryDir).version, 2);
+    assert.equal(readDataJs(ctx.galleryDir).characters.length, 2);
   } finally {
     teardown(ctx);
   }
@@ -368,32 +352,19 @@ test("refreshGalleryIfPresent never throws — a missing SPA warns instead", asy
   }
 });
 
-test("refreshGalleryIfPresent also absorbs unexpected failures (closed db)", async () => {
-  const ctx = setup();
-  try {
-    await seedCharacter(ctx);
-    await writeGallery(deps(ctx));
-    ctx.db.close();
-    await refreshGalleryIfPresent(deps(ctx));
-    assert.ok(ctx.warnings.some((w) => /gallery refresh failed/u.test(w)));
-  } finally {
-    rmSync(ctx.dir, { recursive: true, force: true });
-  }
-});
-
 test("refresh warnings for non-plain errors keep the stack for diagnosis", async () => {
   const ctx = setup();
   try {
     mkdirSync(ctx.galleryDir, { recursive: true });
     writeFileSync(join(ctx.galleryDir, "index.html"), "seeded");
-    // A TypeError from the db layer is a programmer bug, not an operational
+    // A TypeError from the store layer is a programmer bug, not an operational
     // failure — the swallowed warning must retain the stack trace.
-    const brokenDb = {
+    const brokenStore = {
       listCharacters() {
         throw new TypeError("boom");
       },
-    } as unknown as Database;
-    await refreshGalleryIfPresent(deps(ctx, { db: brokenDb }));
+    } as unknown as CharacterStore;
+    await refreshGalleryIfPresent(deps(ctx, { store: brokenStore }));
     assert.equal(ctx.warnings.length, 1);
     assert.match(ctx.warnings[0] ?? "", /TypeError: boom/u);
     assert.match(ctx.warnings[0] ?? "", /\n\s+at /u);
