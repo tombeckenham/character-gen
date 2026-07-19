@@ -267,3 +267,77 @@ test("buildPublishDescription distills the profile and caps at 2000 chars", () =
   assert.equal(long.length, DESCRIPTION_CAP);
   assert.match(long, /…$/u);
 });
+
+test("a create that 409s on the identifier adopts the existing fal character and updates it", async () => {
+  const { store, dir } = setup();
+  try {
+    const character = await seed(store);
+    await seedAssets(store, character.id, ["master"]);
+    // Scripted per-call: create → 409, list → match, update → success.
+    const calls: string[][] = [];
+    const run = (args: string[]): Promise<GenmediaResult> => {
+      calls.push(args);
+      if (args[2] === "create") {
+        return Promise.resolve({
+          status: 1,
+          stdout: "",
+          stderr: '"message": "@isolde-keeper is already used by another character."',
+        });
+      }
+      if (args[2] === "list") {
+        return Promise.resolve({
+          status: 0,
+          stdout: JSON.stringify({
+            characters: [
+              { id: "fal-orphan", character_identifier: "isolde-keeper" },
+              { id: "fal-other", character_identifier: "someone-else" },
+            ],
+          }),
+          stderr: "",
+        });
+      }
+      return Promise.resolve({
+        status: 0,
+        stdout: JSON.stringify({ character: { id: "fal-orphan" } }),
+        stderr: "",
+      });
+    };
+
+    const outcome = await runPublish(character, { store, runGenmedia: run });
+
+    assert.equal(outcome.falCharacterId, "fal-orphan");
+    assert.equal(outcome.updated, true);
+    assert.deepEqual(
+      calls.map((args) => args[2]),
+      ["create", "list", "update"],
+    );
+    assert.equal(calls[2]?.[3], "fal-orphan");
+    const refreshed = await store.getCharacter(character.id);
+    assert.equal(refreshed?.falCharacterId, "fal-orphan");
+    assert.equal(refreshed?.status.publish, "done");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a 409 with no matching character on fal still fails loudly", async () => {
+  const { store, dir } = setup();
+  try {
+    const character = await seed(store);
+    await seedAssets(store, character.id, ["master"]);
+    // oxlint-disable-next-line consistent-function-scoping -- mirrors the sibling scripted-runner tests
+    const run = (args: string[]): Promise<GenmediaResult> =>
+      Promise.resolve(
+        args[2] === "list"
+          ? { status: 0, stdout: JSON.stringify({ characters: [] }), stderr: "" }
+          : { status: 1, stdout: "", stderr: "Assets POST /characters failed (409)" },
+      );
+
+    await assert.rejects(() => runPublish(character, { store, runGenmedia: run }), /409/u);
+    assert.equal((await store.getCharacter(character.id))?.status.publish, "error");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -48,8 +48,12 @@ export async function cmdPublish(rest: string[], deps: PublishDeps = {}): Promis
     }
     let runGenmedia = deps.runGenmedia;
     if (!runGenmedia) {
+      // The Assets Characters write endpoints require an ADMIN-scoped key, so
+      // FAL_ADMIN_KEY (when set) beats the regular resolution chain.
+      const adminKey = env["FAL_ADMIN_KEY"];
       const key = resolveFalKey({ env });
-      runGenmedia = makeGenmediaRunner({ ...env, ...(key.ok ? { FAL_KEY: key.key } : {}) });
+      const falKey = adminKey && adminKey.length > 0 ? adminKey : key.ok ? key.key : undefined;
+      runGenmedia = makeGenmediaRunner({ ...env, ...(falKey ? { FAL_KEY: falKey } : {}) });
     }
     let succeeded: boolean;
     try {

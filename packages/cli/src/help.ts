@@ -69,7 +69,10 @@ export const COMMAND_HELP: Record<string, string> = {
   out to the genmedia CLI (must be on PATH). Sends up to 20 prioritized image
   request_ids as reference_images, the master image as the cover, and a
   description distilled from the profile. Re-publishing a character that
-  already has a fal id updates it in place.`,
+  already has a fal id updates it in place.
+  The Assets write endpoints need an ADMIN-scoped key: set FAL_ADMIN_KEY (it
+  beats the regular key chain for this command). Create one at
+  https://fal.ai/dashboard/keys.`,
   open: `character-gen open [--no-browser]
   Write the gallery files and open the file:// URL in a browser.
   --no-browser writes the gallery and prints the URL without opening it.`,

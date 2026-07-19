@@ -136,12 +136,43 @@ export function buildPublishArgs(
 }
 
 /**
+ * When a create 409s because the @identifier is taken, the usual cause is our
+ * own orphaned earlier create — the Assets API has been observed creating the
+ * character server-side and *then* failing the request (e.g. a non-admin key),
+ * leaving a fal character we never got the id for. Recover by listing and
+ * adopting the character whose identifier matches; null when it isn't there.
+ */
+async function findFalCharacterIdByIdentifier(
+  runGenmedia: GenmediaRunner,
+  identifier: string,
+): Promise<string | null> {
+  const result = await runGenmedia(["assets", "characters", "list", "--json"]);
+  if (result.status !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout) as {
+      characters?: Array<{ id?: unknown; character_identifier?: unknown }>;
+    };
+    const match = parsed.characters?.find((c) => c.character_identifier === identifier);
+    return match && typeof match.id === "string" && match.id.length > 0 ? match.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True for the Assets 409 "identifier already used" validation failure. */
+function isIdentifierTakenError(result: GenmediaResult): boolean {
+  const text = result.stderr + result.stdout;
+  return text.includes("already used by another character") || text.includes("(409)");
+}
+
+/**
  * Publishes the character to fal Assets Characters via genmedia: prioritized
  * image request_ids as `reference_images` (≤20), the master's fal URL as the
  * cover, and an idempotency key derived from the local UUID. Stores the
  * returned fal character id; when one already exists the publish becomes an
- * update (PATCH semantics — the reference set is replaced wholesale). Marks
- * the `publish` step running → done/error.
+ * update (PATCH semantics — the reference set is replaced wholesale). A create
+ * that 409s on the identifier adopts the existing fal character and updates it
+ * instead. Marks the `publish` step running → done/error.
  */
 export async function runPublish(
   character: CharacterRecord,
@@ -157,21 +188,32 @@ export async function runPublish(
     );
   }
   const coverUrl = await findMasterUrl(deps.store, character.id);
-  const updated = character.falCharacterId !== null;
-  const args = buildPublishArgs(character, requestIds, coverUrl);
 
   return withStepStatus(deps.store, character.id, "publish", report, async () => {
+    let target = character;
+    let updated = target.falCharacterId !== null;
     report(
       `publish: ${updated ? "updating" : "creating"} fal character (${requestIds.length} references)…`,
     );
-    const result = await deps.runGenmedia(args);
+    let result = await deps.runGenmedia(buildPublishArgs(target, requestIds, coverUrl));
+
+    if (result.status !== 0 && !updated && isIdentifierTakenError(result)) {
+      const existingId = await findFalCharacterIdByIdentifier(deps.runGenmedia, target.identifier);
+      if (existingId) {
+        report(`publish: @${target.identifier} already exists on fal — updating ${existingId}`);
+        target = { ...target, falCharacterId: existingId };
+        updated = true;
+        result = await deps.runGenmedia(buildPublishArgs(target, requestIds, coverUrl));
+      }
+    }
+
     if (result.status !== 0) {
       const detail = (result.stderr || result.stdout).trim();
       throw new Error(
         `genmedia assets characters ${updated ? "update" : "create"} failed (exit ${result.status})${detail ? `: ${detail}` : ""}`,
       );
     }
-    const falCharacterId = parseCharacterId(result.stdout) ?? character.falCharacterId;
+    const falCharacterId = parseCharacterId(result.stdout) ?? target.falCharacterId;
     if (!falCharacterId) {
       throw new Error(
         `genmedia succeeded but returned no character id — raw output: ${result.stdout.trim().slice(0, 300)}`,
