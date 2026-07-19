@@ -31,7 +31,7 @@ export function statePaths(env: NodeJS.ProcessEnv = process.env): StatePaths {
   };
 }
 
-/** Creates the state root (and given subdirs) lazily; safe to call repeatedly. */
+/** Idempotent: creates the state root (and any given subdirs) if absent. */
 export function ensureStateDirs(
   paths: StatePaths,
   subdirs: ReadonlyArray<keyof StatePaths> = ["root"],

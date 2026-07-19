@@ -1,30 +1,40 @@
 // Shared domain types for the character-gen engine.
-// Kept free of runtime values that TypeScript's erasableSyntaxOnly would reject
-// (no enums/namespaces); string unions + `as const` arrays instead.
+// No enums/namespaces — erasableSyntaxOnly rejects them; string unions + `as
+// const` arrays instead.
 
-/** The 8 turnaround angles, in 45° increments. */
 export const TURNAROUND_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315] as const;
 
 export type TurnaroundAngle = (typeof TURNAROUND_ANGLES)[number];
 
-/** Every asset kind the pipeline can produce, stored in `assets.kind`. */
+/** Asset kinds for the 8 turnaround frames, e.g. `angle_45`. */
+export type AngleKind = `angle_${TurnaroundAngle}`;
+
+/** The `assets.kind` string union — angle members derived from TURNAROUND_ANGLES. */
 export const ASSET_KINDS = [
   "master",
   "expression",
   "outfit",
-  "angle_0",
-  "angle_45",
-  "angle_90",
-  "angle_135",
-  "angle_180",
-  "angle_225",
-  "angle_270",
-  "angle_315",
+  ...TURNAROUND_ANGLES.map((angle) => `angle_${angle}` as const),
   "voice_sample",
   "speech",
 ] as const;
 
 export type AssetKind = (typeof ASSET_KINDS)[number];
+
+/** The asset kind for a given turnaround angle. */
+export function angleKind(angle: TurnaroundAngle): AngleKind {
+  return `angle_${angle}`;
+}
+
+/** The turnaround angle encoded in an `angle_*` kind, or null if it isn't one. */
+export function angleFromKind(kind: string): TurnaroundAngle | null {
+  const match = /^angle_(\d+)$/u.exec(kind);
+  if (!match) return null;
+  const angle = Number(match[1]);
+  return (TURNAROUND_ANGLES as readonly number[]).includes(angle)
+    ? (angle as TurnaroundAngle)
+    : null;
+}
 
 /** Pipeline steps whose progress we track per character. */
 export const PIPELINE_STEPS = ["profile", "sheet", "turnaround", "voice", "publish"] as const;

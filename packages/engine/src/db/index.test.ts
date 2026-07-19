@@ -11,6 +11,18 @@ function tmpDbFile(): { file: string; dir: string } {
   return { file: join(dir, "db.sqlite"), dir };
 }
 
+/** Flattens an error and its `cause` chain — Drizzle wraps the sqlite error
+ * (with the real "UNIQUE/FOREIGN KEY constraint failed" text) in `cause`. */
+function errorChainText(err: unknown): string {
+  let text = "";
+  let current: unknown = err;
+  while (current instanceof Error) {
+    text += `${current.message}\n`;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return text;
+}
+
 const profile: CharacterProfile = {
   name: "Isolde the Lighthouse Keeper",
   identifier: "isolde-keeper",
@@ -28,7 +40,7 @@ test("insert then get a character by id and by identifier, round-tripping JSON",
       name: "Isolde the Lighthouse Keeper",
       profile,
     });
-    assert.match(created.id, /[0-9a-f-]{36}/u);
+    assert.match(created.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
 
     const byId = await db.getCharacter(created.id);
     assert.ok(byId);
@@ -158,20 +170,82 @@ test("schema apply is idempotent and data persists across reopen", async () => {
   }
 });
 
-test("listCharacters returns newest first", async () => {
+test("listCharacters returns newest first (deterministic via explicit createdAt)", async () => {
   const { file, dir } = tmpDbFile();
   const db = openDatabase(file);
   try {
-    await db.insertCharacter({ identifier: "one", name: "One", profile });
-    await new Promise((r) => {
-      setTimeout(r, 2);
-    });
-    await db.insertCharacter({ identifier: "two", name: "Two", profile });
+    await db.insertCharacter({ identifier: "one", name: "One", profile, createdAt: 1000 });
+    await db.insertCharacter({ identifier: "two", name: "Two", profile, createdAt: 2000 });
     const all = await db.listCharacters();
     assert.deepEqual(
       all.map((c) => c.identifier),
       ["two", "one"],
     );
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listCharacters breaks same-millisecond ties by insertion order (rowid)", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    await db.insertCharacter({ identifier: "first", name: "First", profile, createdAt: 5000 });
+    await db.insertCharacter({ identifier: "second", name: "Second", profile, createdAt: 5000 });
+    const all = await db.listCharacters();
+    assert.deepEqual(
+      all.map((c) => c.identifier),
+      ["second", "first"],
+    );
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("duplicate identifier insert rejects with a UNIQUE constraint error", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    await db.insertCharacter({ identifier: "isolde-keeper", name: "Isolde", profile });
+    await assert.rejects(
+      () => db.insertCharacter({ identifier: "isolde-keeper", name: "Clone", profile }),
+      (err) => {
+        assert.match(errorChainText(err), /UNIQUE constraint failed/iu);
+        return true;
+      },
+    );
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("asset insert for a nonexistent character rejects with a FK violation", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    // Proves PRAGMA foreign_keys=ON took effect through Drizzle on this connection.
+    await assert.rejects(
+      () => db.insertAsset({ characterId: "ghost", kind: "master" }),
+      (err) => {
+        assert.match(errorChainText(err), /FOREIGN KEY constraint failed/iu);
+        return true;
+      },
+    );
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("updateCharacter on a nonexistent id returns null", async () => {
+  const { file, dir } = tmpDbFile();
+  const db = openDatabase(file);
+  try {
+    const result = await db.updateCharacter("no-such-id", { name: "Nobody" });
+    assert.equal(result, null);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

@@ -4,10 +4,9 @@ import * as readline from "node:readline/promises";
 import {
   ensureStateDirs,
   openDatabase,
-  pingFal,
   runDoctor,
   statePaths,
-  writeStateConfig,
+  storeValidatedKey,
 } from "@character-gen/engine";
 import { COMMAND_HELP, ROOT_HELP } from "./help.ts";
 
@@ -19,20 +18,49 @@ function err(line: string): void {
   process.stderr.write(`${line}\n`);
 }
 
-/** Pipeline commands not yet built, mapped to the phase that delivers them. */
-const STUBS: Record<string, number> = {
-  create: 2,
-  sheet: 2,
-  open: 3,
-  turnaround: 5,
-  voice: 6,
-  speak: 6,
-  publish: 7,
-  extract: 8,
-};
+/** Pipeline commands that are recognized but not built yet. */
+const STUBS = new Set([
+  "create",
+  "sheet",
+  "open",
+  "turnaround",
+  "voice",
+  "speak",
+  "publish",
+  "extract",
+]);
 
 function wantsHelp(rest: string[]): boolean {
   return rest.includes("--help") || rest.includes("-h");
+}
+
+/** Resolves the fal key for `setup` from --api-key or an interactive prompt.
+ * Returns the key, or an error message for the caller to print. */
+async function acquireApiKey(rest: string[]): Promise<{ key: string } | { error: string }> {
+  const { values } = parseArgs({
+    args: rest,
+    options: { "api-key": { type: "string" } },
+    allowPositionals: false,
+  });
+
+  const apiKeyFlag = values["api-key"];
+  // An explicit-but-empty --api-key is an error, not a cue to prompt: falling
+  // into the interactive readline would hang in a non-TTY (CI/agent) context.
+  if (apiKeyFlag !== undefined && apiKeyFlag.trim().length === 0) {
+    return { error: "--api-key was empty. Pass a key, or omit the flag to be prompted." };
+  }
+
+  let key = apiKeyFlag?.trim();
+  if (key === undefined) {
+    if (!input.isTTY) {
+      return { error: "No API key provided. Pass --api-key <key> (stdin is not a TTY)." };
+    }
+    const rl = readline.createInterface({ input, output });
+    key = (await rl.question("Enter your fal API key: ")).trim();
+    rl.close();
+  }
+  if (!key) return { error: "No API key provided." };
+  return { key };
 }
 
 async function cmdSetup(rest: string[]): Promise<number> {
@@ -40,33 +68,30 @@ async function cmdSetup(rest: string[]): Promise<number> {
     out(COMMAND_HELP["setup"] ?? "");
     return 0;
   }
-  const { values } = parseArgs({
-    args: rest,
-    options: { "api-key": { type: "string" } },
-    allowPositionals: false,
-  });
 
-  let key = values["api-key"];
-  if (!key) {
-    const rl = readline.createInterface({ input, output });
-    key = (await rl.question("Enter your fal API key: ")).trim();
-    rl.close();
-  }
-  if (!key) {
-    err("No API key provided.");
+  const acquired = await acquireApiKey(rest);
+  if ("error" in acquired) {
+    err(acquired.error);
     return 1;
   }
 
   out("Validating key against fal…");
-  const ping = await pingFal(key);
-  if (!ping.ok) {
-    err(`Key validation failed (${ping.status ?? ping.error ?? "unknown error"}).`);
+  const paths = statePaths();
+  const result = await storeValidatedKey({ key: acquired.key, configFile: paths.configFile });
+  if (!result.stored) {
+    err(
+      `fal rejected the key (${result.ping.status ?? "unknown"}). Not saved — check it and retry.`,
+    );
     return 1;
   }
-
-  const paths = statePaths();
-  writeStateConfig(paths.configFile, { apiKey: key });
-  out(`Key validated and saved to ${paths.configFile} (mode 0600).`);
+  if (result.verified) {
+    out(`Key validated and saved to ${result.configFile} (mode 0600).`);
+  } else {
+    const why = result.ping.status ?? result.ping.error ?? "unknown";
+    out(
+      `Could not verify key (${why}) — saved to ${result.configFile} anyway. Run \`character-gen doctor\` once online.`,
+    );
+  }
   return 0;
 }
 
@@ -88,6 +113,7 @@ async function cmdDoctor(rest: string[]): Promise<number> {
   }
   out(`state dir: ${report.stateDir}`);
   out(`db:        ${report.dbOk ? "ok" : `FAILED (${report.dbError ?? "unknown"})`}`);
+  if (report.hint) out(`\nHint: ${report.hint}`);
   out(report.healthy ? "\nHealthy." : "\nUnhealthy — see failures above.");
   return report.healthy ? 0 : 1;
 }
@@ -170,13 +196,12 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
     case "show":
       return cmdShow(rest);
     default: {
-      const phase = STUBS[command];
-      if (phase !== undefined) {
+      if (STUBS.has(command)) {
         if (wantsHelp(rest)) {
           out(COMMAND_HELP[command] ?? "");
           return 0;
         }
-        err(`character-gen ${command}: not implemented yet (phase ${phase}).`);
+        err(`character-gen ${command}: not implemented yet — coming soon.`);
         return 1;
       }
       err(`Unknown command: ${command}\n`);
@@ -186,7 +211,8 @@ function dispatch(command: string | undefined, rest: string[]): number | Promise
   }
 }
 
-/** Runs one CLI invocation and returns the process exit code. */
+/** Runs one CLI invocation and returns the process exit code. Never throws —
+ * any error is printed and becomes exit 1. */
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   try {

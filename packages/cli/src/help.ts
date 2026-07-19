@@ -4,16 +4,16 @@ Usage:
   character-gen <command> [options]
 
 Commands:
-  create "<description>"   Invent + run the pipeline for a new character   (phase 2)
+  create "<description>"   Invent + run the pipeline for a new character   (coming soon)
   list                     List all characters
   show <id|identifier>     Print a character's profile and assets
-  sheet <char>             (Re)generate master sheet + expressions          (phase 2)
-  turnaround <char>        Generate the 8-angle spin frames                  (phase 5)
-  voice <char>             Design the character's signature voice            (phase 6)
-  speak <char> "<line>"    Speak a line in the character's voice             (phase 6)
-  extract <script-file>    Emit cast JSON from a script                      (phase 8)
-  publish <char>           Create/update the character on fal Assets         (phase 7)
-  open                     Write the gallery and open it in a browser        (phase 3)
+  sheet <char>             (Re)generate master sheet + expressions          (coming soon)
+  turnaround <char>        Generate the 8-angle spin frames                  (coming soon)
+  voice <char>             Design the character's signature voice            (coming soon)
+  speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
+  extract <script-file>    Emit cast JSON from a script                      (coming soon)
+  publish <char>           Create/update the character on fal Assets         (coming soon)
+  open                     Write the gallery and open it in a browser        (coming soon)
   setup                    Store and validate your fal API key
   doctor                   Diagnose environment, key, and fal connectivity
 

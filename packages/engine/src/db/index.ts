@@ -1,15 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+// The node-sqlite driver only exists on the drizzle 1.0 RC line — do not
+// downgrade to 0.x (stable 0.45.x has no node:sqlite driver).
 import { drizzle } from "drizzle-orm/node-sqlite";
-import { eq, or, desc } from "drizzle-orm";
+import { eq, or, desc, sql } from "drizzle-orm";
 import { assets, characters, settings, SCHEMA_DDL } from "./schema.ts";
-import { emptyStatus } from "../types.ts";
+import { emptyStatus, PIPELINE_STEPS, STEP_STATES } from "../types.ts";
 import type {
   AssetKind,
   AssetRecord,
   CharacterProfile,
   CharacterRecord,
   CharacterStatus,
+  StepState,
 } from "../types.ts";
 
 export interface NewCharacter {
@@ -19,6 +22,8 @@ export interface NewCharacter {
   profile: CharacterProfile;
   status?: CharacterStatus;
   falCharacterId?: string | null;
+  /** Override the creation timestamp (defaults to now); mainly for tests. */
+  createdAt?: number;
 }
 
 export interface NewAsset {
@@ -41,13 +46,38 @@ export interface CharacterPatch {
 type CharacterRow = typeof characters.$inferSelect;
 type AssetRow = typeof assets.$inferSelect;
 
+/** Coerces a persisted status blob back to a full CharacterStatus, dropping any
+ * unknown keys/values and defaulting missing steps to "pending". */
+function normalizeStatus(parsed: unknown): CharacterStatus {
+  const status = emptyStatus();
+  if (parsed && typeof parsed === "object") {
+    const source = parsed as Record<string, unknown>;
+    for (const step of PIPELINE_STEPS) {
+      const value = source[step];
+      if (typeof value === "string" && (STEP_STATES as readonly string[]).includes(value)) {
+        status[step] = value as StepState;
+      }
+    }
+  }
+  return status;
+}
+
 function rowToCharacter(row: CharacterRow): CharacterRecord {
+  const profile = JSON.parse(row.profile) as CharacterProfile;
+  if (
+    typeof profile.name !== "string" ||
+    profile.name.length === 0 ||
+    typeof profile.identifier !== "string" ||
+    profile.identifier.length === 0
+  ) {
+    throw new Error(`corrupt profile row ${row.id}: missing name/identifier`);
+  }
   return {
     id: row.id,
     identifier: row.identifier,
     name: row.name,
-    profile: JSON.parse(row.profile) as CharacterProfile,
-    status: JSON.parse(row.status) as CharacterStatus,
+    profile,
+    status: normalizeStatus(JSON.parse(row.status)),
     falCharacterId: row.falCharacterId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -91,12 +121,14 @@ export function openDatabase(dbFile: string): Database {
   const client = new DatabaseSync(dbFile);
   client.exec("PRAGMA journal_mode = WAL;");
   client.exec("PRAGMA foreign_keys = ON;");
+  // Schema generation marker for future gated ALTERs.
+  client.exec("PRAGMA user_version = 1;");
   client.exec(SCHEMA_DDL);
   const db = drizzle({ client });
 
   return {
     async insertCharacter(input) {
-      const now = Date.now();
+      const now = input.createdAt ?? Date.now();
       const record: CharacterRecord = {
         id: input.id ?? randomUUID(),
         identifier: input.identifier,
@@ -131,7 +163,11 @@ export function openDatabase(dbFile: string): Database {
     },
 
     async listCharacters() {
-      const rows = await db.select().from(characters).orderBy(desc(characters.createdAt));
+      // rowid DESC breaks ties for rows created in the same millisecond.
+      const rows = await db
+        .select()
+        .from(characters)
+        .orderBy(desc(characters.createdAt), sql`rowid DESC`);
       return rows.map((row) => rowToCharacter(row));
     },
 

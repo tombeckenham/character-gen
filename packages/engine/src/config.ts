@@ -1,6 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { mkdirSync } from "node:fs";
 
 export interface StateConfig {
   apiKey?: string;
@@ -37,15 +36,13 @@ export function readApiKeyFromFile(path: string): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-export function readStateConfig(configFile: string): StateConfig {
-  const obj = readJsonFile(configFile);
-  if (!obj) return {};
-  const apiKey = obj["apiKey"];
-  return typeof apiKey === "string" ? { apiKey } : {};
-}
-
-/** Writes the state config as JSON with owner-only (0600) permissions. */
+/**
+ * Writes the state config as JSON with owner-only (0600) permissions. The
+ * `mode` option only applies when the file is first created, so an explicit
+ * `chmodSync` also tightens an existing (e.g. 0644) file on overwrite.
+ */
 export function writeStateConfig(configFile: string, config: StateConfig): void {
   mkdirSync(dirname(configFile), { recursive: true });
   writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(configFile, 0o600);
 }

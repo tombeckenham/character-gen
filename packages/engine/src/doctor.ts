@@ -26,6 +26,20 @@ export interface DoctorReport {
   dbOk: boolean;
   dbError: string | null;
   healthy: boolean;
+  /** Actionable remediation hint when the failure has a known cause. */
+  hint: string | null;
+}
+
+/**
+ * When the key came from the genmedia config but fal rejects it with 401, the
+ * likely cause is that genmedia stored the key encrypted at rest (its raw value
+ * is unusable). Point the user at `setup` to store a working key.
+ */
+function doctorHint(keySource: KeySource | null, ping: PingResult | null): string | null {
+  if (keySource === "genmedia" && ping && !ping.ok && ping.status === 401) {
+    return "Key found in ~/.genmedia/config.json but fal rejected it (401) — genmedia may store it encrypted on this machine. Run `character-gen setup` to store a working key.";
+  }
+  return null;
 }
 
 export interface DoctorOptions {
@@ -62,23 +76,28 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   try {
     ensureStateDirs(paths, ["root"]);
     const db = openDatabase(paths.dbFile);
-    await db.listCharacters();
-    db.close();
-    dbOk = true;
+    try {
+      await db.listCharacters();
+      dbOk = true;
+    } finally {
+      db.close();
+    }
   } catch (err) {
     dbError = err instanceof Error ? err.message : String(err);
   }
 
   const healthy = nodeOk && key.ok && ping !== null && ping.ok && dbOk;
+  const keySource = key.ok ? key.source : null;
 
   return {
     nodeVersion,
     nodeOk,
-    keySource: key.ok ? key.source : null,
+    keySource,
     ping,
     stateDir: paths.root,
     dbOk,
     dbError,
     healthy,
+    hint: doctorHint(keySource, ping),
   };
 }

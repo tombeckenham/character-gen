@@ -85,6 +85,22 @@ test("empty-string apiKey is skipped as if absent", () => {
   }
 });
 
+test("an empty-string FAL_KEY falls through to the config sources", () => {
+  const dir = tmp();
+  try {
+    const genmedia = join(dir, "genmedia.json");
+    writeFileSync(genmedia, JSON.stringify({ apiKey: "from-genmedia" }));
+    const result = resolveFalKey({
+      env: { FAL_KEY: "" },
+      genmediaConfigPath: genmedia,
+      stateConfigPath: join(dir, "missing-state.json"),
+    });
+    assert.deepEqual(result, { ok: true, key: "from-genmedia", source: "genmedia" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("returns not-ok when no source provides a key", () => {
   const dir = tmp();
   try {
