@@ -45,9 +45,9 @@ Data flow: skills → CLI → fal APIs only. Characters are **project-local and 
 Character pipeline (each step records fal `request_id`s in the character's character.json; they double as `reference_images` for publish):
 
 1. **Profile** — Claude authors the JSON (name, identifier, archetype, visual canon, voice description) in the skill flow and passes `--profile-json`.
-2. **Sheet** — `openai/gpt-image-2` master image; `/edit` for expressions/outfits keeping identity.
+2. **Sheet** — `openai/gpt-image-2` master image; `/edit` for a portrait close-up, expressions, and outfits keeping identity. The portrait is the gallery hero and the publish cover.
 3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`, 12 views at 30°; gallery renders drag-to-scrub spinner.
 4. **Voice** — `fal-ai/minimax/voice-design` signature sample; `bytedance/seed-audio-1.0` speaks lines with it.
-5. **Publish** — shell out to `genmedia assets characters create/update` (request_ids as `reference_images`, max 20; `--idempotency_key` derived from local UUID). Store the returned fal character id in character.json; publish becomes update when it exists.
+5. **Publish** — shell out to `genmedia assets characters create/update` (request_ids as `reference_images`, max 20; the portrait as `--cover_image_url`; the profile `logline` as the semantic `--description`; `--idempotency_key` derived from local UUID). Store the returned fal character id in character.json; publish becomes update when it exists.
 
 fal API key resolution order: `FAL_KEY` env → `~/.genmedia/config.json` `apiKey` → `~/.character-gen/config.json` (written by `character-gen setup`).

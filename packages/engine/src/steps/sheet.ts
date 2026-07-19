@@ -93,6 +93,23 @@ export function buildMasterPrompt(profile: CharacterProfile): string {
     .join(" ");
 }
 
+/**
+ * Close-up portrait edit prompt: a clean, front-facing head-and-shoulders shot.
+ * Generated as a core sheet image so every character has a real portrait — it's
+ * the gallery hero and the published asset's cover, not a full-body sheet crop.
+ */
+export function buildPortraitPrompt(profile: CharacterProfile): string {
+  return [
+    `Head-and-shoulders close-up portrait of ${profile.name}: the exact same character as the reference image, with an identical face, features, hair, and coloring.`,
+    "Tightly framed on the face and shoulders, facing the camera, calm and confident expression, eyes open, sharp focus on the face.",
+    buildCanonClause(profile),
+    "Plain light-gray studio background, soft even lighting, consistent art style, sharp detail. No text, no labels, no watermark, no border.",
+    buildNegativeClause(profile),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** Expression-sheet edit prompt: same identity, grid of facial expressions. */
 export function buildExpressionPrompt(profile: CharacterProfile): string {
   return [
@@ -124,12 +141,15 @@ export function buildOutfitPrompt(profile: CharacterProfile): string {
 }
 
 interface VariantSpec {
-  kind: "expression" | "outfit";
+  kind: "portrait" | "expression" | "outfit";
   buildPrompt: (profile: CharacterProfile) => string;
 }
 
-/** Default derived variants: one expression sheet + one outfit swap. */
+/** Default derived variants: a close-up portrait (the cover/hero), one
+ * expression sheet, and one outfit swap. Portrait first so it lands early in an
+ * open gallery. */
 export const SHEET_VARIANTS: readonly VariantSpec[] = [
+  { kind: "portrait", buildPrompt: buildPortraitPrompt },
   { kind: "expression", buildPrompt: buildExpressionPrompt },
   { kind: "outfit", buildPrompt: buildOutfitPrompt },
 ];

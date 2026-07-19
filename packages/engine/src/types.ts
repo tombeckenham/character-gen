@@ -46,6 +46,7 @@ export type FaceKind = (typeof FACE_KINDS)[number];
 /** The `assets.kind` string union — angle members derived from TURNAROUND_ANGLES. */
 export const ASSET_KINDS = [
   "master",
+  "portrait",
   "expression",
   "outfit",
   ...FACE_KINDS,
@@ -207,6 +208,9 @@ export interface CharacterProfile {
   archetype?: string;
   personality?: string;
   backstory?: string;
+  /** One-sentence semantic summary of the character. Published verbatim as the
+   * fal Assets `description` (used for semantic matching), so keep it crisp. */
+  logline?: string;
   /** Locked physical description reused verbatim in every image prompt. */
   visualCanon?: string;
   voiceDescription?: string;

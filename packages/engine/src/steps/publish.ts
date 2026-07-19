@@ -7,7 +7,6 @@ import type { AssetRecord, CharacterProfile, CharacterRecord } from "../types.ts
 import { prioritizeReferenceAssets, REFERENCE_IMAGE_CAP } from "../publish-priority.ts";
 import { dedupedReporter, withStepStatus } from "./common.ts";
 import type { StepMediaDeps } from "./common.ts";
-import { findMasterUrl } from "./turnaround.ts";
 
 /** The fal Assets Characters API caps `description` at this many characters. */
 export const DESCRIPTION_CAP = 2000;
@@ -47,11 +46,17 @@ export function makeGenmediaRunner(env: NodeJS.ProcessEnv = process.env): Genmed
 }
 
 /**
- * Distills the profile into the required Assets `description` (≤2000 chars,
- * used for semantic matching): archetype + personality + visual canon, falling
- * back to the free-form description or the name so it is never empty.
+ * The Assets `description` (≤2000 chars, used for semantic matching). Prefers
+ * the authored one-line `logline` — a crisp semantic summary is a far better
+ * match target than a wall of canon. Falls back to archetype + personality +
+ * visual canon, then the free-form description or the name, so it is never empty.
  */
 export function buildPublishDescription(profile: CharacterProfile): string {
+  const logline = profile.logline;
+  if (typeof logline === "string" && logline.trim().length > 0) {
+    const trimmed = logline.trim();
+    return trimmed.length > DESCRIPTION_CAP ? `${trimmed.slice(0, DESCRIPTION_CAP - 1)}…` : trimmed;
+  }
   const description = profile["description"];
   const parts = [
     profile.archetype,
@@ -74,6 +79,20 @@ function referenceRequestIds(assets: AssetRecord[]): string[] {
     (asset) => asset.falRequestId as string,
   );
   return [...new Set(ids)];
+}
+
+/** The best cover image URL for the asset: the newest portrait close-up, else
+ * a front face, else the master sheet. Assets are oldest-first, so scan back to
+ * front and take the first match per preferred kind. */
+export function findCoverUrl(assets: AssetRecord[]): string | null {
+  const newestUrlOfKind = (kind: string): string | null => {
+    for (let i = assets.length - 1; i >= 0; i -= 1) {
+      const asset = assets[i];
+      if (asset && asset.kind === kind && asset.url) return asset.url;
+    }
+    return null;
+  };
+  return newestUrlOfKind("portrait") ?? newestUrlOfKind("face_front") ?? newestUrlOfKind("master");
 }
 
 /** Parses genmedia's --json output for the created/updated character id. */
@@ -167,8 +186,8 @@ function isIdentifierTakenError(result: GenmediaResult): boolean {
 
 /**
  * Publishes the character to fal Assets Characters via genmedia: prioritized
- * image request_ids as `reference_images` (≤20), the master's fal URL as the
- * cover, and an idempotency key derived from the local UUID. Stores the
+ * image request_ids as `reference_images` (≤20), the portrait close-up (else a
+ * face, else the master) as the cover, and an idempotency key from the local UUID. Stores the
  * returned fal character id; when one already exists the publish becomes an
  * update (PATCH semantics — the reference set is replaced wholesale). A create
  * that 409s on the identifier adopts the existing fal character and updates it
@@ -187,7 +206,7 @@ export async function runPublish(
       `Nothing to publish for "${character.identifier}" — generate a sheet first (\`character-gen sheet ${character.identifier}\`).`,
     );
   }
-  const coverUrl = await findMasterUrl(deps.store, character.id);
+  const coverUrl = findCoverUrl(assets);
 
   return withStepStatus(deps.store, character.id, "publish", report, async () => {
     let target = character;

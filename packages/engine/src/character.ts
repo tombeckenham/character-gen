@@ -8,6 +8,7 @@ const OPTIONAL_STRING_FIELDS = [
   "archetype",
   "personality",
   "backstory",
+  "logline",
   "visualCanon",
   "voiceDescription",
 ] as const;

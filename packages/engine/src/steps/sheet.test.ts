@@ -7,7 +7,13 @@ import { openStore } from "../store/index.ts";
 import type { CharacterStore } from "../store/index.ts";
 import type { CharacterRecord } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
-import { buildMasterPrompt, buildOutfitPrompt, makeFalImageGenerator, runSheet } from "./sheet.ts";
+import {
+  buildMasterPrompt,
+  buildOutfitPrompt,
+  buildPortraitPrompt,
+  makeFalImageGenerator,
+  runSheet,
+} from "./sheet.ts";
 import type { GeneratedAsset, ImageEditInput, ImageGenerator, ImageGenInput } from "./sheet.ts";
 
 interface GenCall {
@@ -92,11 +98,12 @@ test("runSheet generates master + variants, writes files, and records assets", a
       onProgress: (m) => messages.push(m),
     });
 
-    // One text-to-image master + two edits (expression, outfit).
-    assert.equal(calls.length, 3);
+    // One text-to-image master + three edits (portrait, expression, outfit).
+    assert.equal(calls.length, 4);
     assert.equal(calls[0]?.op, "generate");
     assert.equal(calls[1]?.op, "edit");
     assert.equal(calls[2]?.op, "edit");
+    assert.equal(calls[3]?.op, "edit");
     // Edits reference the master image URL.
     const firstEdit = calls[1];
     assert.ok(firstEdit);
@@ -107,17 +114,18 @@ test("runSheet generates master + variants, writes files, and records assets", a
     // Outcome + DB rows carry the fal request ids.
     assert.equal(outcome.master.kind, "master");
     assert.equal(outcome.master.falRequestId, "req-master");
-    assert.equal(outcome.variants.length, 2);
+    assert.equal(outcome.variants.length, 3);
     assert.deepEqual(
       outcome.variants.map((v) => v.kind),
-      ["expression", "outfit"],
+      ["portrait", "expression", "outfit"],
     );
 
     const stored = await store.getAssets(character.id);
-    assert.equal(stored.length, 3);
+    assert.equal(stored.length, 4);
     assert.deepEqual(stored.map((a) => a.falRequestId).toSorted(), [
       "req-edit-0",
       "req-edit-1",
+      "req-edit-2",
       "req-master",
     ]);
 
@@ -125,6 +133,7 @@ test("runSheet generates master + variants, writes files, and records assets", a
     const masterPath = join(charactersDir, "isolde-keeper", "master-1.png");
     assert.ok(existsSync(masterPath));
     assert.equal(readFileSync(masterPath).length, 4);
+    assert.ok(existsSync(join(charactersDir, "isolde-keeper", "portrait-1.png")));
     assert.ok(existsSync(join(charactersDir, "isolde-keeper", "expression-1.png")));
     assert.ok(existsSync(join(charactersDir, "isolde-keeper", "outfit-1.png")));
     assert.equal(outcome.master.localPath, masterPath);
@@ -174,22 +183,19 @@ test("runSheet on a fal failure sets status error and keeps prior assets", async
   const { store, dir } = setup();
   try {
     const character = await seedCharacter(store);
-    // Fail the second edit (the outfit); master + expression should survive.
-    const { generator } = fakeGenerator({ failEditIndex: 1 });
+    // Fail the outfit edit (index 2); master + portrait + expression should survive.
+    const { generator } = fakeGenerator({ failEditIndex: 2 });
 
     await assert.rejects(
       () => runSheet(character, { store, generator, fetchImpl: fakeFetch() }),
-      /edit 1 boom/u,
+      /edit 2 boom/u,
     );
 
     const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.sheet, "error");
 
     const stored = await store.getAssets(character.id);
-    assert.deepEqual(
-      stored.map((a) => a.kind),
-      ["master", "expression"],
-    );
+    assert.deepEqual(stored.map((a) => a.kind).toSorted(), ["expression", "master", "portrait"]);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });
@@ -249,22 +255,22 @@ test("runSheet keeps the failed variant's request_id and the master intact on va
   try {
     const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
-    // Master downloads fine; the expression variant 404s on download while the
-    // outfit variant (running concurrently) succeeds.
-    const fetchImpl = fakeFetch(new Set(["https://fal.media/edit-0.png"]));
+    // Master downloads fine; the expression variant (edit index 1) 404s on
+    // download while the portrait and outfit variants succeed concurrently.
+    const fetchImpl = fakeFetch(new Set(["https://fal.media/edit-1.png"]));
 
     await assert.rejects(
       () => runSheet(character, { store, generator, fetchImpl }),
-      /sheet: 1 of 2 variants failed — expression \(Failed to download image \(HTTP 404\)/u,
+      /sheet: 1 of 3 variants failed — expression \(Failed to download image \(HTTP 404\)/u,
     );
 
     const stored = await store.getAssets(character.id);
-    assert.equal(stored.length, 3);
+    assert.equal(stored.length, 4);
     const master = stored.find((a) => a.kind === "master");
     const expression = stored.find((a) => a.kind === "expression");
     const outfit = stored.find((a) => a.kind === "outfit");
     assert.ok(master?.localPath, "master downloaded and has a path");
-    assert.equal(expression?.falRequestId, "req-edit-0");
+    assert.equal(expression?.falRequestId, "req-edit-1");
     assert.equal(expression?.localPath, null);
     assert.ok(outfit?.localPath, "the concurrent outfit variant still downloaded");
   } finally {
@@ -358,6 +364,18 @@ test("makeFalImageGenerator maps subscribe results and conforms to the schemas",
     image_urls: ["https://fal.media/m.png"],
     quality: "high",
   });
+});
+
+test("portrait prompt is a close-up that locks identity to the reference", () => {
+  const prompt = buildPortraitPrompt({
+    name: "Isolde",
+    identifier: "isolde-keeper",
+    visualCanon: "silver braid, oilskin coat",
+  });
+  assert.match(prompt, /close-up portrait of Isolde/u);
+  assert.match(prompt, /head-and-shoulders/iu);
+  assert.match(prompt, /exact same character as the reference/u);
+  assert.match(prompt, /silver braid/u);
 });
 
 test("outfit prompt omits the archetype clause when absent", () => {

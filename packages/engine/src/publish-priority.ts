@@ -11,13 +11,15 @@ export const REFERENCE_IMAGE_CAP = 20;
 const CARDINAL_ANGLES: ReadonlySet<number> = new Set([0, 90, 180, 270]);
 
 /**
- * Rank of an asset kind for publish references — lower publishes first. Faces
- * beat everything (face drift is the #1 downstream failure), then the master,
+ * Rank of an asset kind for publish references — lower publishes first. The
+ * portrait close-up and faces beat everything (face drift is the #1 downstream
+ * failure), then the master,
  * scale, expressions, detail macros, the four cardinal turnaround angles,
  * outfit variants, and finally the remaining angles. Unknown/non-image kinds
  * (voice, speech) rank last and only survive under-cap.
  */
 export function referenceRank(kind: string): number {
+  if (kind === "portrait") return 0;
   if (kind.startsWith("face_")) return 0;
   if (kind === "master") return 1;
   if (kind === "scale") return 2;

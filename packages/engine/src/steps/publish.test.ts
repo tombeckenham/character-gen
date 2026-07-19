@@ -99,6 +99,25 @@ test("first publish creates the fal character and stores the returned id", async
   }
 });
 
+test("the portrait close-up is used as the cover, not the master sheet", async () => {
+  const { store, dir } = setup();
+  try {
+    const character = await seed(store);
+    await seedAssets(store, character.id, ["master", "portrait"]);
+    const runner = fakeRunner();
+
+    await runPublish(character, { store, runGenmedia: runner.run });
+
+    const args = runner.calls[0];
+    assert.ok(args);
+    // portrait is seeded at index 1 → https://fal.media/1.png, and outranks master.
+    assert.equal(args[args.indexOf("--cover_image_url") + 1], "https://fal.media/1.png");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("re-publishing a character with a fal id becomes an update", async () => {
   const { store, dir } = setup();
   try {
@@ -239,6 +258,20 @@ test("unparseable genmedia output with no prior fal id is an error, not a silent
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("buildPublishDescription prefers the logline over the composed canon", () => {
+  assert.equal(
+    buildPublishDescription({
+      name: "Isolde",
+      identifier: "isolde-keeper",
+      logline: "  A weathered lighthouse keeper who collects the last words of storms.  ",
+      archetype: "keeper",
+      personality: "patient",
+      visualCanon: "silver braid",
+    }),
+    "A weathered lighthouse keeper who collects the last words of storms.",
+  );
 });
 
 test("buildPublishDescription distills the profile and caps at 2000 chars", () => {
