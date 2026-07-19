@@ -194,7 +194,7 @@ async function generateVariant(spec: VariantSpec, ctx: VariantContext): Promise<
 
 /**
  * Generates the master reference image and the default derived variants for a
- * character, downloading each to `<mediaDir>/<identifier>/` and recording an
+ * character, downloading each to `characters/<identifier>/` and recording an
  * asset row (with the fal request id) per image. The master is generated first
  * (the variants edit it); the variants then fan out concurrently (bounded by
  * `concurrency`), each landing via `onAsset` as it is stored. Marks the `sheet`
@@ -208,9 +208,9 @@ export async function runSheet(
   deps: RunSheetDeps,
 ): Promise<SheetOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.mediaDir, "sheet");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "sheet");
 
-  return await withStepStatus(deps.db, character.id, "sheet", report, async () => {
+  return await withStepStatus(deps.store, character.id, "sheet", report, async () => {
     report("master: generating reference image…");
     const masterPrompt = buildMasterPrompt(character.profile);
     const masterImage = await deps.generator.generate(

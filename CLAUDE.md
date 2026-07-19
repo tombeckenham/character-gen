@@ -15,7 +15,7 @@ Design thesis: no server, no UI-triggered actions. Every verb is a CLI command w
 - **oxfmt** for formatting, **oxlint** for linting (configs: `.oxfmtrc.json`, `.oxlintrc.json`). No prettier/eslint/biome.
 - **lefthook** runs typecheck + lint + format on pre-commit (`lefthook.yml`); format auto-fixes and re-stages. After a fresh clone run `bunx lefthook install`.
 - **TanStack**: use the `tanstack` skill / `@tanstack/cli` to look up TanStack docs, and after installing a TanStack library use `@tanstack/intent` to install its skills.
-- **Runtime target is Node ≥ 22.13** (bun is for dev; the shipped CLI runs on the user's Node). SQLite goes through the built-in `node:sqlite` driver with Drizzle (`drizzle-orm/node-sqlite`). Never introduce native modules (no better-sqlite3, no node-gyp anywhere in the tree) — a clean `curl | sh` install is a core requirement.
+- **Runtime target is Node ≥ 22.18** (bun is for dev; the shipped CLI runs `src/index.ts` on the user's Node via type stripping, unflagged from 22.18). No database — state is plain JSON + files (see below). Never introduce native modules (no node-gyp anywhere in the tree) — a clean `curl | sh` install is a core requirement.
 - Verify every fal endpoint schema with `genmedia schema <endpoint>` before implementing against it.
 
 ## Commands
@@ -29,25 +29,25 @@ bun run format:check      # oxfmt --check .
 bun run check             # typecheck + lint + format:check
 ```
 
-No test runner is set up yet.
+Tests run via `bun run test` (node --test over packages/_/src/\**/_.test.ts).
 
 ## Architecture
 
 Bun workspaces monorepo:
 
-- `packages/engine` — the library: fal client, API-key resolution, SQLite (node:sqlite + Drizzle), pipeline steps, gallery writer. All real logic lives here.
+- `packages/engine` — the library: fal client, API-key resolution, the folder-backed character store (`src/store/`), pipeline steps, gallery writer. All real logic lives here.
 - `packages/cli` — thin `character-gen` command wrapper over the engine (`bin` → `src/index.ts`).
 - `gallery-app/` — React + TanStack Router SPA compiled to a **single self-contained HTML file** (Vite + vite-plugin-singlefile); `fetch()` and ES modules are blocked on `file://`, so everything must be inlined.
 - `skills/` — Claude Code skills (markdown) that call the CLI.
 
-Data flow: skills → CLI → fal APIs only. State lives in `~/.character-gen/` (db.sqlite, media/, config.json). The CLI writes `gallery/` (index.html + data.js + media); the gallery page polls by re-injecting `<script src="data.js?t=...">` every 2s and re-renders in place when the `version` field changes — that's the live-refresh trick, since `fetch()` doesn't work on `file://`.
+Data flow: skills → CLI → fal APIs only. Characters are **project-local and git-committable**: one `characters/<identifier>/` folder per character in the cwd, holding `character.json` (profile, per-step status, embedded asset records with relative media paths) plus the downloaded media. Only the API key lives globally in `~/.character-gen/config.json`; `CHARACTER_GEN_HOME` relocates everything under one dir (tests rely on this). The CLI writes `gallery/` in the cwd (index.html + data.js + media); the gallery page polls by re-injecting `<script src="data.js?t=...">` every 2s and re-renders in place when the `version` field (a content hash) changes — that's the live-refresh trick, since `fetch()` doesn't work on `file://`.
 
-Character pipeline (each step records fal `request_id`s in SQLite; they double as `reference_images` for publish):
+Character pipeline (each step records fal `request_id`s in the character's character.json; they double as `reference_images` for publish):
 
 1. **Profile** — Claude authors the JSON (name, identifier, archetype, visual canon, voice description) in the skill flow and passes `--profile-json`.
 2. **Sheet** — `openai/gpt-image-2` master image; `/edit` for expressions/outfits keeping identity.
 3. **Turnaround** — `fal-ai/qwen-image-edit-2511-multiple-angles`, 12 views at 30°; gallery renders drag-to-scrub spinner.
 4. **Voice** — `fal-ai/minimax/voice-design` signature sample; `bytedance/seed-audio-1.0` speaks lines with it.
-5. **Publish** — `POST https://api.fal.ai/v1/assets/characters` (`Authorization: Key <FAL_KEY>`, request_ids as `reference_images`, `Idempotency-Key` derived from local UUID). Store the returned fal character id; publish becomes update when it exists.
+5. **Publish** — shell out to `genmedia assets characters create/update` (request_ids as `reference_images`, max 20; `--idempotency_key` derived from local UUID). Store the returned fal character id in character.json; publish becomes update when it exists.
 
 fal API key resolution order: `FAL_KEY` env → `~/.genmedia/config.json` `apiKey` → `~/.character-gen/config.json` (written by `character-gen setup`).

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "@character-gen/engine";
-import type { Database, VoiceGenerator } from "@character-gen/engine";
+import { openStore } from "@character-gen/engine";
+import type { CharacterStore, VoiceGenerator } from "@character-gen/engine";
 import { cmdSpeak, cmdVoice } from "./pipeline.ts";
 
 const MP3 = "data:audio/mpeg;base64,SUQz";
@@ -16,13 +16,13 @@ const okGenerator: VoiceGenerator = {
 };
 
 async function seed(dir: string): Promise<void> {
-  const db: Database = openDatabase(join(dir, "db.sqlite"));
-  await db.insertCharacter({
+  const store: CharacterStore = openStore(join(dir, "characters"));
+  await store.insertCharacter({
     identifier: "isolde-keeper",
     name: "Isolde",
     profile: { name: "Isolde", identifier: "isolde-keeper", voiceDescription: "gravelly alto" },
   });
-  db.close();
+  store.close();
 }
 
 test("voice then speak records a voice_sample and a speech asset through the CLI seam", async () => {
@@ -40,15 +40,15 @@ test("voice then speak records a voice_sample and a speech asset through the CLI
       0,
     );
 
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("isolde-keeper");
+      const character = await store.getCharacter("isolde-keeper");
       assert.equal(character?.status.voice, "done");
-      const assets = await db.getAssets(character?.id ?? "");
+      const assets = await store.getAssets(character?.id ?? "");
       assert.equal(assets.filter((a) => a.kind === "voice_sample").length, 1);
       assert.equal(assets.filter((a) => a.kind === "speech").length, 1);
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

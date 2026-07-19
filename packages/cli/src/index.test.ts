@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "@character-gen/engine";
+import { openStore } from "@character-gen/engine";
 
 const ENTRY = join(import.meta.dirname, "index.ts");
 
@@ -68,7 +68,7 @@ test("doctor with no key exits 1, skips the ping, reports state", () => {
   assert.equal(res.status, 1);
   assert.match(res.stdout, /key:\s+none found/u);
   assert.match(res.stdout, /fal ping:\s+skipped \(no key\)/u);
-  assert.match(res.stdout, /db:\s+ok/u);
+  assert.match(res.stdout, /store:\s+ok/u);
   assert.doesNotMatch(res.stderr, /experimental/iu);
 });
 
@@ -81,13 +81,13 @@ test("list on an empty state dir exits 0", () => {
 test("list renders a table for seeded characters", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    db.close();
+    store.close();
     const res = runCliIn(dir, ["list"]);
     assert.equal(res.status, 0);
     assert.match(res.stdout, /IDENTIFIER/u);
@@ -113,14 +113,14 @@ test("show with an unknown target exits 1", () => {
 test("show prints a seeded character's profile and assets", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    const character = await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    const character = await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    await db.insertAsset({ characterId: character.id, kind: "master", falRequestId: "req-1" });
-    db.close();
+    await store.insertAsset({ characterId: character.id, kind: "master", falRequestId: "req-1" });
+    store.close();
     const res = runCliIn(dir, ["show", "isolde-keeper"]);
     assert.equal(res.status, 0);
     assert.match(res.stdout, /"identifier": "isolde-keeper"/u);
@@ -143,15 +143,15 @@ test("create with --steps profile derives a minimal profile and persists it", as
     const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stdout, /Created A Lighthouse Keeper \(a-lighthouse-keeper\)/u);
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("a-lighthouse-keeper");
+      const character = await store.getCharacter("a-lighthouse-keeper");
       assert.ok(character);
       assert.equal(character.status.profile, "done");
       assert.equal(character.status.sheet, "pending");
       assert.equal(character.profile["description"], "A Lighthouse Keeper");
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -161,13 +161,13 @@ test("create with --steps profile derives a minimal profile and persists it", as
 test("create derivation suffixes the identifier when the slug is taken", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "a-lighthouse-keeper",
       name: "Existing",
       profile: { name: "Existing", identifier: "a-lighthouse-keeper" },
     });
-    db.close();
+    store.close();
     const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stdout, /a-lighthouse-keeper-2/u);
@@ -229,11 +229,11 @@ test("create --steps accepts turnaround (fails at the key, not the step list)", 
     assert.doesNotMatch(res.stderr, /Unknown step|not implemented/u);
     assert.match(res.stdout, /Created someone/u);
     assert.match(res.stderr, /No fal API key found/u);
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      assert.ok(await db.getCharacter("someone"));
+      assert.ok(await store.getCharacter("someone"));
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -262,13 +262,13 @@ test("create (default steps) with a valid profile but no key creates then fails 
     assert.match(res.stdout, /Created Isolde \(isolde-keeper\)/u);
     assert.match(res.stderr, /No fal API key found/u);
     // The character persisted even though the sheet step could not run.
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("isolde-keeper");
+      const character = await store.getCharacter("isolde-keeper");
       assert.ok(character);
       assert.equal(character.status.sheet, "pending");
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -283,14 +283,14 @@ test("create --steps sheet still creates the character (profile step is implicit
     assert.equal(res.status, 1);
     assert.match(res.stdout, /Created A Night Watchman \(a-night-watchman\)/u);
     assert.match(res.stderr, /No fal API key found/u);
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("a-night-watchman");
+      const character = await store.getCharacter("a-night-watchman");
       assert.ok(character);
       assert.equal(character.status.profile, "done");
       assert.equal(character.status.sheet, "pending");
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -306,13 +306,13 @@ test("sheet on an unknown character exits 1", () => {
 test("sheet on an existing character with no key exits 1 with a setup hint", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    db.close();
+    store.close();
     const res = runCliIn(dir, ["sheet", "isolde-keeper"]);
     assert.equal(res.status, 1);
     // Character lookup succeeds first, so the failure is specifically the key.
@@ -344,13 +344,13 @@ test("turnaround on an unknown character exits 1", () => {
 test("turnaround on an existing character with no key exits 1 with a setup hint", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
   try {
-    const db = openDatabase(join(dir, "db.sqlite"));
-    await db.insertCharacter({
+    const store = openStore(join(dir, "characters"));
+    await store.insertCharacter({
       identifier: "isolde-keeper",
       name: "Isolde",
       profile: { name: "Isolde", identifier: "isolde-keeper" },
     });
-    db.close();
+    store.close();
     const res = runCliIn(dir, ["turnaround", "isolde-keeper"]);
     assert.equal(res.status, 1);
     assert.match(res.stderr, /No fal API key found/u);
@@ -382,7 +382,8 @@ test("open --no-browser writes the gallery and prints the file:// URL", () => {
     assert.match(res.stdout, /Gallery written:/u);
     assert.match(res.stdout, /file:\/\/.*\/gallery\/index\.html/u);
     const dataJs = readFileSync(join(dir, "gallery", "data.js"), "utf8");
-    assert.match(dataJs, /^window\.CHARGEN_DATA = \{"version":1,"characters":\[\]\};/u);
+    // The version is a content digest, so only its shape is asserted.
+    assert.match(dataJs, /^window\.CHARGEN_DATA = \{"version":\d+,"characters":\[\]\};/u);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

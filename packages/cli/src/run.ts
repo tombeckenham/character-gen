@@ -3,7 +3,7 @@ import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 import {
   ensureStateDirs,
-  openDatabase,
+  openStore,
   runDoctor,
   statePaths,
   storeValidatedKey,
@@ -86,18 +86,19 @@ async function cmdDoctor(rest: string[]): Promise<number> {
     return 0;
   }
   const report = await runDoctor();
-  out(`node:      ${report.nodeVersion} ${report.nodeOk ? "ok" : "TOO OLD (need >= 22.13)"}`);
-  out(`key:       ${report.keySource ? `resolved (source: ${report.keySource})` : "none found"}`);
+  out(`node:       ${report.nodeVersion} ${report.nodeOk ? "ok" : "TOO OLD (need >= 22.18)"}`);
+  out(`key:        ${report.keySource ? `resolved (source: ${report.keySource})` : "none found"}`);
   if (report.ping) {
     const detail = report.ping.ok
       ? `ok (${report.ping.status}) via ${report.ping.endpoint}`
       : `FAILED (${report.ping.status ?? report.ping.error ?? "unknown"}) via ${report.ping.endpoint ?? "n/a"}`;
-    out(`fal ping:  ${detail}`);
+    out(`fal ping:   ${detail}`);
   } else {
-    out("fal ping:  skipped (no key)");
+    out("fal ping:   skipped (no key)");
   }
-  out(`state dir: ${report.stateDir}`);
-  out(`db:        ${report.dbOk ? "ok" : `FAILED (${report.dbError ?? "unknown"})`}`);
+  out(`config dir: ${report.stateDir}`);
+  out(`characters: ${report.charactersDir}`);
+  out(`store:      ${report.storeOk ? "ok" : `FAILED (${report.storeError ?? "unknown"})`}`);
   if (report.hint) out(`\nHint: ${report.hint}`);
   out(report.healthy ? "\nHealthy." : "\nUnhealthy — see failures above.");
   return report.healthy ? 0 : 1;
@@ -110,9 +111,9 @@ async function cmdList(rest: string[]): Promise<number> {
   }
   const paths = statePaths();
   ensureStateDirs(paths, ["root"]);
-  const db = openDatabase(paths.dbFile);
+  const store = openStore(paths.charactersDir);
   try {
-    const chars = await db.listCharacters();
+    const chars = await store.listCharacters();
     if (chars.length === 0) {
       out("No characters yet. Ask Claude to create one.");
       return 0;
@@ -133,7 +134,7 @@ async function cmdList(rest: string[]): Promise<number> {
     }
     return 0;
   } finally {
-    db.close();
+    store.close();
   }
 }
 
@@ -150,18 +151,18 @@ async function cmdShow(rest: string[]): Promise<number> {
   }
   const paths = statePaths();
   ensureStateDirs(paths, ["root"]);
-  const db = openDatabase(paths.dbFile);
+  const store = openStore(paths.charactersDir);
   try {
-    const character = await db.getCharacter(target);
+    const character = await store.getCharacter(target);
     if (!character) {
       err(`No character found matching "${target}".`);
       return 1;
     }
-    const assets = await db.getAssets(character.id);
+    const assets = await store.getAssets(character.id);
     out(JSON.stringify({ ...character, assets }, null, 2));
     return 0;
   } finally {
-    db.close();
+    store.close();
   }
 }
 

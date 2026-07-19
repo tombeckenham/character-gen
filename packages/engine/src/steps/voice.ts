@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { FalClient } from "../fal.ts";
 import type { AssetRecord, CharacterProfile, CharacterRecord } from "../types.ts";
 import {
@@ -134,7 +136,7 @@ export interface VoiceOutcome {
 
 /**
  * Designs the character's signature voice from its voice description,
- * downloading the preview clip to `<mediaDir>/<identifier>/` and recording a
+ * downloading the preview clip to `characters/<identifier>/` and recording a
  * `voice_sample` asset whose meta carries the reusable `custom_voice_id` (which
  * `speak` reads). Marks the `voice` status running → done; on failure marks it
  * `error` and rethrows. Requires a profile with a voice description (or an
@@ -145,7 +147,7 @@ export async function runVoice(
   deps: RunVoiceDeps,
 ): Promise<VoiceOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.mediaDir, "voice");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "voice");
 
   const prompt = buildVoiceDesignPrompt(character.profile);
   if (prompt === null) {
@@ -155,7 +157,7 @@ export async function runVoice(
   }
   const previewText = buildPreviewText(character.profile);
 
-  return await withStepStatus(deps.db, character.id, "voice", report, async () => {
+  return await withStepStatus(deps.store, character.id, "voice", report, async () => {
     report("voice: designing signature voice…");
     const voice = await deps.generator.design({ prompt, previewText }, (update) =>
       report(`voice: ${update.status.toLowerCase()}`),
@@ -184,10 +186,10 @@ export async function runVoice(
  * oldest-first). Null when the voice step has not produced a usable one.
  */
 export async function findDesignedVoiceId(
-  db: StepMediaDeps["db"],
+  store: StepMediaDeps["store"],
   characterId: string,
 ): Promise<string | null> {
-  const assets = await db.getAssets(characterId);
+  const assets = await store.getAssets(characterId);
   for (let i = assets.length - 1; i >= 0; i -= 1) {
     const asset = assets[i];
     if (asset && asset.kind === "voice_sample" && asset.meta) {
@@ -211,9 +213,10 @@ export interface SpeakOutcome {
 
 /**
  * Voices a line in the character's designed voice, downloading the clip to
- * `<mediaDir>/<identifier>/speech-<n>.mp3` and recording a `speech` asset. Each
- * clip gets a distinct sequence number (an atomic per-character counter) so
- * successive lines never overwrite one another. Requires a designed voice (run
+ * `characters/<identifier>/speech-<n>.mp3` and recording a `speech` asset. Each
+ * clip gets a distinct sequence number (derived from the character's existing
+ * speech assets, then bumped past any file already on disk) so successive
+ * lines never overwrite one another. Requires a designed voice (run
  * `voice` first); this is not a tracked pipeline step, so it leaves statuses
  * untouched.
  */
@@ -222,13 +225,13 @@ export async function runSpeak(
   deps: RunSpeakDeps,
 ): Promise<SpeakOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.mediaDir, "voice");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "voice");
 
   const line = deps.line.trim();
   if (line.length === 0) {
     throw new Error("Nothing to speak — provide a non-empty line.");
   }
-  const voiceId = await findDesignedVoiceId(deps.db, character.id);
+  const voiceId = await findDesignedVoiceId(deps.store, character.id);
   if (voiceId === null) {
     throw new Error(
       `No designed voice for "${character.identifier}" — run \`character-gen voice ${character.identifier}\` first.`,
@@ -240,7 +243,11 @@ export async function runSpeak(
     { text: line, voiceId, ...(deps.emotion ? { emotion: deps.emotion } : {}) },
     (update) => report(`speak: ${update.status.toLowerCase()}`),
   );
-  const seq = await deps.db.bumpCounter(`speech_seq:${character.id}`);
+  const assets = await deps.store.getAssets(character.id);
+  let seq = assets.filter((asset) => asset.kind === "speech").length + 1;
+  // Skip files already on disk (e.g. a hand-pruned character.json) so a new
+  // clip never overwrites an earlier one.
+  while (existsSync(join(charDir, `speech-${seq}.mp3`))) seq += 1;
   const speech = await storeAsset({
     deps,
     character,

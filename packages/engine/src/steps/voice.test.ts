@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../db/index.ts";
-import type { Database } from "../db/index.ts";
+import { openStore } from "../store/index.ts";
+import type { CharacterStore } from "../store/index.ts";
 import type { CharacterProfile, CharacterRecord } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
 import {
@@ -52,13 +52,20 @@ function fakeGenerator(options: { failDesign?: boolean; failSpeak?: boolean } = 
 const fakeFetch: FetchImpl = ((_url: string | URL | Request) =>
   Promise.resolve(new Response(new Uint8Array([0x49, 0x44, 0x33]), { status: 200 }))) as FetchImpl;
 
-function setup(): { db: Database; dir: string; mediaDir: string } {
+function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-voice-"));
-  return { db: openDatabase(join(dir, "db.sqlite")), dir, mediaDir: join(dir, "media") };
+  return {
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
+    dir,
+    charactersDir: join(dir, "characters"),
+  };
 }
 
-function seed(db: Database, profile: Partial<CharacterProfile> = {}): Promise<CharacterRecord> {
-  return db.insertCharacter({
+function seed(
+  store: CharacterStore,
+  profile: Partial<CharacterProfile> = {},
+): Promise<CharacterRecord> {
+  return store.insertCharacter({
     identifier: "isolde-keeper",
     name: "Isolde",
     profile: {
@@ -71,8 +78,8 @@ function seed(db: Database, profile: Partial<CharacterProfile> = {}): Promise<Ch
 }
 
 /** Seeds a character whose profile carries no voice cues at all. */
-function seedVoiceless(db: Database): Promise<CharacterRecord> {
-  return db.insertCharacter({
+function seedVoiceless(store: CharacterStore): Promise<CharacterRecord> {
+  return store.insertCharacter({
     identifier: "isolde-keeper",
     name: "Isolde",
     profile: { name: "Isolde", identifier: "isolde-keeper" },
@@ -80,12 +87,12 @@ function seedVoiceless(db: Database): Promise<CharacterRecord> {
 }
 
 test("runVoice designs the voice, stores the sample with the custom voice id, marks done", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seed(db);
+    const character = await seed(store);
     const { generator, designs } = fakeGenerator();
 
-    const outcome = await runVoice(character, { db, generator, mediaDir, fetchImpl: fakeFetch });
+    const outcome = await runVoice(character, { store, generator, fetchImpl: fakeFetch });
 
     assert.equal(designs.length, 1);
     assert.equal(designs[0]?.prompt, "low, gravelly alto; unhurried; faint coastal lilt");
@@ -94,71 +101,69 @@ test("runVoice designs the voice, stores the sample with the custom voice id, ma
     assert.equal(outcome.customVoiceId, "voice-xyz");
     assert.equal(outcome.sample.kind, "voice_sample");
     assert.equal(outcome.sample.meta?.["customVoiceId"], "voice-xyz");
-    assert.ok(existsSync(join(mediaDir, "isolde-keeper", "voice-sample.mp3")));
+    assert.ok(existsSync(join(charactersDir, "isolde-keeper", "voice-sample.mp3")));
 
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.voice, "done");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runVoice without a voice description errors, runs nothing, keeps status pending", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedVoiceless(db);
+    const character = await seedVoiceless(store);
     const { generator, designs } = fakeGenerator();
 
     await assert.rejects(
-      () => runVoice(character, { db, generator, mediaDir, fetchImpl: fakeFetch }),
+      () => runVoice(character, { store, generator, fetchImpl: fakeFetch }),
       /No voice description.*voiceDescription/u,
     );
     assert.equal(designs.length, 0);
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.voice, "pending");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runVoice marks the step error when the design fails", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seed(db);
+    const character = await seed(store);
     const { generator } = fakeGenerator({ failDesign: true });
     await assert.rejects(
-      () => runVoice(character, { db, generator, mediaDir, fetchImpl: fakeFetch }),
+      () => runVoice(character, { store, generator, fetchImpl: fakeFetch }),
       /design boom/u,
     );
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.voice, "error");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSpeak voices a line with the designed voice id and stores distinct speech clips", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seed(db);
+    const character = await seed(store);
     const { generator, speaks } = fakeGenerator();
-    await runVoice(character, { db, generator, mediaDir, fetchImpl: fakeFetch });
+    await runVoice(character, { store, generator, fetchImpl: fakeFetch });
 
     const first = await runSpeak(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch,
       line: "You should not have come here.",
       emotion: "angry",
     });
     const second = await runSpeak(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch,
       line: "But since you have, sit.",
     });
@@ -170,48 +175,48 @@ test("runSpeak voices a line with the designed voice id and stores distinct spee
     assert.notEqual(first.speech.localPath, second.speech.localPath);
     assert.equal(first.speech.meta?.["text"], "You should not have come here.");
 
-    const speeches = (await db.getAssets(character.id)).filter((a) => a.kind === "speech");
+    const speeches = (await store.getAssets(character.id)).filter((a) => a.kind === "speech");
     assert.equal(speeches.length, 2);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runSpeak without a designed voice errors clearly and generates nothing", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seed(db);
+    const character = await seed(store);
     const { generator, speaks } = fakeGenerator();
     await assert.rejects(
-      () => runSpeak(character, { db, generator, mediaDir, fetchImpl: fakeFetch, line: "Hello?" }),
+      () => runSpeak(character, { store, generator, fetchImpl: fakeFetch, line: "Hello?" }),
       /No designed voice.*character-gen voice isolde-keeper/u,
     );
     assert.equal(speaks.length, 0);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("findDesignedVoiceId returns the newest custom voice id, or null when none", async () => {
-  const { db, dir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seed(db);
-    assert.equal(await findDesignedVoiceId(db, character.id), null);
-    await db.insertAsset({
+    const character = await seed(store);
+    assert.equal(await findDesignedVoiceId(store, character.id), null);
+    await store.insertAsset({
       characterId: character.id,
       kind: "voice_sample",
       meta: { customVoiceId: "voice-1" },
     });
-    await db.insertAsset({
+    await store.insertAsset({
       characterId: character.id,
       kind: "voice_sample",
       meta: { customVoiceId: "voice-2" },
     });
-    assert.equal(await findDesignedVoiceId(db, character.id), "voice-2");
+    assert.equal(await findDesignedVoiceId(store, character.id), "voice-2");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -3,7 +3,7 @@ import {
   ensureStateDirs,
   makeFalImageGenerator,
   MAX_DETAIL_MACROS,
-  openDatabase,
+  openStore,
   SHEET_PASSES,
   SHEET_TIERS,
   statePaths,
@@ -79,7 +79,7 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
     );
     return 1;
   }
-  // Flags are validated before any DB/network work so a typo fails fast.
+  // Flags are validated before any store/network work so a typo fails fast.
   const requestedPasses = values["passes"] === undefined ? null : parsePasses(values["passes"]);
   if (requestedPasses && "error" in requestedPasses) {
     err(requestedPasses.error);
@@ -91,10 +91,10 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
     return 1;
   }
   const paths = statePaths(deps.env ?? process.env);
-  ensureStateDirs(paths, ["root", "mediaDir"]);
-  const db = openDatabase(paths.dbFile);
+  ensureStateDirs(paths, ["root"]);
+  const store = openStore(paths.charactersDir);
   try {
-    const character = await db.getCharacter(target);
+    const character = await store.getCharacter(target);
     if (!character) {
       err(`No character found matching "${target}".`);
       return 1;
@@ -110,7 +110,7 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
     }
     if (requestedPasses) {
       const ok = await runSheetPassesAndReport(
-        db,
+        store,
         character,
         generator,
         paths,
@@ -120,11 +120,11 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
       return ok ? 0 : 1;
     }
     // Money-guard: a tier's passes never run off a failed core sheet.
-    if (!(await runSheetAndReport(db, character, generator, paths))) return 1;
+    if (!(await runSheetAndReport(store, character, generator, paths))) return 1;
     const passes = TIER_PASSES[parsedTier.tier];
     if (passes.length === 0) return 0;
     const ok = await runSheetPassesAndReport(
-      db,
+      store,
       character,
       generator,
       paths,
@@ -133,6 +133,6 @@ export async function cmdSheet(rest: string[], deps: SheetDeps = {}): Promise<nu
     );
     return ok ? 0 : 1;
   } finally {
-    db.close();
+    store.close();
   }
 }

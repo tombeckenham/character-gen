@@ -5,7 +5,7 @@ import {
   makeFalAngleGenerator,
   makeFalClient,
   makeFalVoiceGenerator,
-  openDatabase,
+  openStore,
   refreshGalleryIfPresent,
   resolveFalKey,
   runSheet,
@@ -19,7 +19,7 @@ import {
 import type {
   AngleGenerator,
   CharacterRecord,
-  Database,
+  CharacterStore,
   FalClient,
   ImageGenerator,
   SheetPass,
@@ -56,8 +56,8 @@ export function resolveClient(): { client: FalClient } | { error: string } {
 
 /** Rewrites the gallery if one has ever been written (i.e. `open` was run);
  * failures only warn. */
-export function refreshGallery(db: Database, paths: StatePaths): Promise<void> {
-  return refreshGalleryIfPresent({ db, galleryDir: paths.galleryDir, onWarn: err });
+export function refreshGallery(store: CharacterStore, paths: StatePaths): Promise<void> {
+  return refreshGalleryIfPresent({ store, galleryDir: paths.galleryDir, onWarn: err });
 }
 
 /**
@@ -67,7 +67,7 @@ export function refreshGallery(db: Database, paths: StatePaths): Promise<void> {
  * live. Returns whether the step succeeded.
  */
 async function reportStep(
-  db: Database,
+  store: CharacterStore,
   paths: StatePaths,
   label: string,
   work: () => Promise<string[]>,
@@ -80,7 +80,7 @@ async function reportStep(
     err(`${label} generation failed: ${describeError(error)}`);
     succeeded = false;
   }
-  await refreshGallery(db, paths);
+  await refreshGallery(store, paths);
   return succeeded;
 }
 
@@ -96,32 +96,34 @@ function assetLine(asset: { kind: string; localPath: string | null }): string {
  * step's first asset (or its end) lands. Fire-and-forget: refreshGallery never
  * throws, and the writer's atomic data.js rename makes concurrent runs safe.
  */
-function progressWithLiveStart(db: Database, paths: StatePaths): (message: string) => void {
+function progressWithLiveStart(
+  store: CharacterStore,
+  paths: StatePaths,
+): (message: string) => void {
   let refreshed = false;
   return (message: string): void => {
     err(message);
     if (!refreshed) {
       refreshed = true;
-      void refreshGallery(db, paths);
+      void refreshGallery(store, paths);
     }
   };
 }
 
 export function runSheetAndReport(
-  db: Database,
+  store: CharacterStore,
   character: CharacterRecord,
   generator: ImageGenerator,
   paths: StatePaths,
 ): Promise<boolean> {
-  return reportStep(db, paths, "Sheet", async () => {
+  return reportStep(store, paths, "Sheet", async () => {
     const outcome = await runSheet(character, {
-      db,
+      store,
       generator,
-      mediaDir: paths.mediaDir,
-      onProgress: progressWithLiveStart(db, paths),
+      onProgress: progressWithLiveStart(store, paths),
       // Per-asset refresh so the master and each variant land in an open gallery
       // as they arrive, not as one batch at the end.
-      onAsset: () => refreshGallery(db, paths),
+      onAsset: () => refreshGallery(store, paths),
     });
     return [
       `Sheet complete for ${character.identifier}: master + ${outcome.variants.length} variants.`,
@@ -131,24 +133,23 @@ export function runSheetAndReport(
 }
 
 export function runSheetPassesAndReport(
-  db: Database,
+  store: CharacterStore,
   character: CharacterRecord,
   generator: ImageGenerator,
   paths: StatePaths,
   passes: readonly SheetPass[],
   detailCap: number,
 ): Promise<boolean> {
-  return reportStep(db, paths, "Sheet passes", async () => {
+  return reportStep(store, paths, "Sheet passes", async () => {
     const outcome = await runSheetPasses(character, {
-      db,
+      store,
       generator,
-      mediaDir: paths.mediaDir,
-      onProgress: progressWithLiveStart(db, paths),
+      onProgress: progressWithLiveStart(store, paths),
       passes,
       detailCap,
       // Per-asset refresh so an open gallery fills in shot by shot
       // (refreshGallery never throws — failures only warn).
-      onAsset: () => refreshGallery(db, paths),
+      onAsset: () => refreshGallery(store, paths),
     });
     return [
       `Passes complete for ${character.identifier} (${passes.join(", ")}): ${outcome.assets.length} images.`,
@@ -158,20 +159,19 @@ export function runSheetPassesAndReport(
 }
 
 export function runTurnaroundAndReport(
-  db: Database,
+  store: CharacterStore,
   character: CharacterRecord,
   generator: AngleGenerator,
   paths: StatePaths,
 ): Promise<boolean> {
-  return reportStep(db, paths, "Turnaround", async () => {
+  return reportStep(store, paths, "Turnaround", async () => {
     const outcome = await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir: paths.mediaDir,
-      onProgress: progressWithLiveStart(db, paths),
+      onProgress: progressWithLiveStart(store, paths),
       // Per-frame refresh so an open gallery shows the spin filling in live
       // (refreshGallery never throws — failures only warn).
-      onFrame: () => refreshGallery(db, paths),
+      onFrame: () => refreshGallery(store, paths),
     });
     return [
       `Turnaround complete for ${character.identifier}: ${outcome.frames.length} frames.`,
@@ -181,17 +181,16 @@ export function runTurnaroundAndReport(
 }
 
 export function runVoiceAndReport(
-  db: Database,
+  store: CharacterStore,
   character: CharacterRecord,
   generator: VoiceGenerator,
   paths: StatePaths,
 ): Promise<boolean> {
-  return reportStep(db, paths, "Voice", async () => {
+  return reportStep(store, paths, "Voice", async () => {
     const outcome = await runVoice(character, {
-      db,
+      store,
       generator,
-      mediaDir: paths.mediaDir,
-      onProgress: progressWithLiveStart(db, paths),
+      onProgress: progressWithLiveStart(store, paths),
     });
     return [
       `Voice designed for ${character.identifier} (custom voice ${outcome.customVoiceId}).`,
@@ -204,7 +203,7 @@ interface StepCmdSpec<G> {
   name: "turnaround" | "voice";
   makeGenerator: (client: FalClient) => G;
   runAndReport: (
-    db: Database,
+    store: CharacterStore,
     character: CharacterRecord,
     generator: G,
     paths: StatePaths,
@@ -229,10 +228,10 @@ async function cmdStep<G>(
     return 1;
   }
   const paths = statePaths(deps.env ?? process.env);
-  ensureStateDirs(paths, ["root", "mediaDir"]);
-  const db = openDatabase(paths.dbFile);
+  ensureStateDirs(paths, ["root"]);
+  const store = openStore(paths.charactersDir);
   try {
-    const character = await db.getCharacter(target);
+    const character = await store.getCharacter(target);
     if (!character) {
       err(`No character found matching "${target}".`);
       return 1;
@@ -242,9 +241,9 @@ async function cmdStep<G>(
       err(resolved.error);
       return 1;
     }
-    return (await spec.runAndReport(db, character, resolved.generator, paths)) ? 0 : 1;
+    return (await spec.runAndReport(store, character, resolved.generator, paths)) ? 0 : 1;
   } finally {
-    db.close();
+    store.close();
   }
 }
 
@@ -310,10 +309,10 @@ export async function cmdSpeak(rest: string[], deps: SpeakDeps = {}): Promise<nu
   }
 
   const paths = statePaths(deps.env ?? process.env);
-  ensureStateDirs(paths, ["root", "mediaDir"]);
-  const db = openDatabase(paths.dbFile);
+  ensureStateDirs(paths, ["root"]);
+  const store = openStore(paths.charactersDir);
   try {
-    const character = await db.getCharacter(target);
+    const character = await store.getCharacter(target);
     if (!character) {
       err(`No character found matching "${target}".`);
       return 1;
@@ -324,12 +323,11 @@ export async function cmdSpeak(rest: string[], deps: SpeakDeps = {}): Promise<nu
       return 1;
     }
     const { generator } = resolved;
-    const ok = await reportStep(db, paths, "Speak", async () => {
+    const ok = await reportStep(store, paths, "Speak", async () => {
       const outcome = await runSpeak(character, {
-        db,
+        store,
         generator,
-        mediaDir: paths.mediaDir,
-        onProgress: progressWithLiveStart(db, paths),
+        onProgress: progressWithLiveStart(store, paths),
         line,
         ...(emotion ? { emotion: emotion as SpeechEmotion } : {}),
       });
@@ -337,6 +335,6 @@ export async function cmdSpeak(rest: string[], deps: SpeakDeps = {}): Promise<nu
     });
     return ok ? 0 : 1;
   } finally {
-    db.close();
+    store.close();
   }
 }

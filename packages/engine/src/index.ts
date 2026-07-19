@@ -31,5 +31,5 @@ export type {
   GalleryData,
   PollOutcome,
 } from "./gallery-data.ts";
-export { openDatabase } from "./db/index.ts";
-export type { Database, NewCharacter, NewAsset, CharacterPatch } from "./db/index.ts";
+export { CHARACTER_FILE, DuplicateIdentifierError, openStore } from "./store/index.ts";
+export type { CharacterStore, NewCharacter, NewAsset, CharacterPatch } from "./store/index.ts";

@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../db/index.ts";
-import type { Database } from "../db/index.ts";
+import { openStore } from "../store/index.ts";
+import type { CharacterStore } from "../store/index.ts";
 import type { CharacterRecord } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
 import { TURNAROUND_ANGLES } from "../types.ts";
@@ -48,19 +48,23 @@ function fakeFetch(notFound: Set<string> = new Set()): FetchImpl {
   }) as unknown as FetchImpl;
 }
 
-function setup(): { db: Database; dir: string; mediaDir: string } {
+function setup(): { store: CharacterStore; dir: string; charactersDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "chargen-turnaround-"));
-  return { db: openDatabase(join(dir, "db.sqlite")), dir, mediaDir: join(dir, "media") };
+  return {
+    store: openStore(join(dir, "characters"), { onWarn: () => {} }),
+    dir,
+    charactersDir: join(dir, "characters"),
+  };
 }
 
-async function seedCharacter(db: Database, withMaster = true): Promise<CharacterRecord> {
-  const character = await db.insertCharacter({
+async function seedCharacter(store: CharacterStore, withMaster = true): Promise<CharacterRecord> {
+  const character = await store.insertCharacter({
     identifier: "isolde-keeper",
     name: "Isolde",
     profile: { name: "Isolde", identifier: "isolde-keeper" },
   });
   if (withMaster) {
-    await db.insertAsset({
+    await store.insertAsset({
       characterId: character.id,
       kind: "master",
       falRequestId: "req-master",
@@ -73,16 +77,15 @@ async function seedCharacter(db: Database, withMaster = true): Promise<Character
 
 // oxlint-disable-next-line max-lines-per-function
 test("runTurnaround generates all 12 angles from the master and records assets in order", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir, charactersDir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator, calls } = fakeGenerator();
     const messages: string[] = [];
 
     const outcome = await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       onProgress: (m) => messages.push(m),
     });
@@ -102,34 +105,33 @@ test("runTurnaround generates all 12 angles from the master and records assets i
     assert.equal(outcome.frames[11]?.falRequestId, "req-angle-330");
 
     // Files landed under media/<identifier>/ and meta records the angle.
-    assert.ok(existsSync(join(mediaDir, "isolde-keeper", "angle-0.png")));
-    assert.ok(existsSync(join(mediaDir, "isolde-keeper", "angle-330.png")));
+    assert.ok(existsSync(join(charactersDir, "isolde-keeper", "angle-0.png")));
+    assert.ok(existsSync(join(charactersDir, "isolde-keeper", "angle-330.png")));
     assert.equal(outcome.frames[1]?.meta?.["horizontalAngle"], 30);
     assert.equal(
       outcome.frames[1]?.meta?.["endpoint"],
       "fal-ai/qwen-image-edit-2511-multiple-angles",
     );
 
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "done");
     assert.ok(messages.some((m) => m.includes("angle 0°")));
     assert.ok(messages.includes("turnaround: done"));
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround accepts an angle subset (cheap test runs)", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator, calls } = fakeGenerator();
 
     const outcome = await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       angles: [90, 270],
     });
@@ -142,25 +144,24 @@ test("runTurnaround accepts an angle subset (cheap test runs)", async () => {
       outcome.frames.map((f) => f.kind),
       ["angle_90", "angle_270"],
     );
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "done");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround reports each stored frame through onFrame as it lands", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
     const seen: string[] = [];
 
     await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       angles: [0, 45, 90],
       onFrame: (frame) => {
@@ -170,22 +171,21 @@ test("runTurnaround reports each stored frame through onFrame as it lands", asyn
 
     assert.deepEqual(seen, ["angle_0", "angle_45", "angle_90"]);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround survives a throwing onFrame sink: all frames land, warning reported", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
     const messages: string[] = [];
 
     const outcome = await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       angles: [0, 45, 90],
       onProgress: (m) => messages.push(m),
@@ -195,24 +195,23 @@ test("runTurnaround survives a throwing onFrame sink: all frames land, warning r
     });
 
     assert.equal(outcome.frames.length, 3);
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "done");
     assert.equal(messages.filter((m) => /frame notification failed: sink boom/u.test(m)).length, 3);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround generates a caller-supplied angle list in its given order", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator, calls } = fakeGenerator();
     const outcome = await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       angles: [180, 0, 90],
     });
@@ -225,22 +224,22 @@ test("runTurnaround generates a caller-supplied angle list in its given order", 
       ["angle_180", "angle_0", "angle_90"],
     );
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("a failing error-status write is warned about and the work error still surfaces", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     // The status DB dies exactly when the step tries to record its failure.
-    const flakyDb: Database = {
-      ...db,
+    const flakyDb: CharacterStore = {
+      ...store,
       setStepState: (id, step, state) =>
         state === "error"
-          ? Promise.reject(new Error("status db down"))
-          : db.setStepState(id, step, state),
+          ? Promise.reject(new Error("status store down"))
+          : store.setStepState(id, step, state),
     };
     const { generator } = fakeGenerator({ failIndex: 0 });
     const messages: string[] = [];
@@ -248,9 +247,8 @@ test("a failing error-status write is warned about and the work error still surf
     await assert.rejects(
       () =>
         runTurnaround(character, {
-          db: flakyDb,
+          store: flakyDb,
           generator,
-          mediaDir,
           fetchImpl: fakeFetch(),
           angles: [0],
           onProgress: (m) => messages.push(m),
@@ -258,35 +256,34 @@ test("a failing error-status write is warned about and the work error still surf
       /angle 0 boom/u,
     );
 
-    assert.ok(messages.some((m) => /could not mark turnaround failed: status db down/u.test(m)));
+    assert.ok(messages.some((m) => /could not mark turnaround failed: status store down/u.test(m)));
     // The error write never landed, so the step is still marked running.
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "running");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("a failing done-status write surfaces as the step error with frames intact", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
-    const flakyDb: Database = {
-      ...db,
+    const character = await seedCharacter(store);
+    const flakyDb: CharacterStore = {
+      ...store,
       setStepState: (id, step, state) =>
         state === "done"
           ? Promise.reject(new Error("done write down"))
-          : db.setStepState(id, step, state),
+          : store.setStepState(id, step, state),
     };
     const { generator } = fakeGenerator();
 
     await assert.rejects(
       () =>
         runTurnaround(character, {
-          db: flakyDb,
+          store: flakyDb,
           generator,
-          mediaDir,
           fetchImpl: fakeFetch(),
           angles: [0, 45],
         }),
@@ -295,61 +292,61 @@ test("a failing done-status write surfaces as the step error with frames intact"
 
     // The work itself succeeded — frames and request_ids are all recorded —
     // but the step reads as error because its completion could not be saved.
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "error");
-    const stored = await db.getAssets(character.id);
+    const stored = await store.getAssets(character.id);
     assert.deepEqual(
       stored.filter((a) => a.kind.startsWith("angle_")).map((a) => a.falRequestId),
       ["req-angle-0", "req-angle-45"],
     );
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround without a master errors clearly, runs nothing, keeps status pending", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db, false);
+    const character = await seedCharacter(store, false);
     const { generator, calls } = fakeGenerator();
 
     await assert.rejects(
-      () => runTurnaround(character, { db, generator, mediaDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(character, { store, generator, fetchImpl: fakeFetch() }),
       /No master image found.*character-gen sheet isolde-keeper/u,
     );
 
     assert.equal(calls.length, 0);
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     // Nothing ran, so the step must not be marked running or error.
     assert.equal(refreshed?.status.turnaround, "pending");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround treats a master row without a URL as missing", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db, false);
-    await db.insertAsset({ characterId: character.id, kind: "master", falRequestId: "req-m" });
+    const character = await seedCharacter(store, false);
+    await store.insertAsset({ characterId: character.id, kind: "master", falRequestId: "req-m" });
     const { generator } = fakeGenerator();
     await assert.rejects(
-      () => runTurnaround(character, { db, generator, mediaDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(character, { store, generator, fetchImpl: fakeFetch() }),
       /No master image found/u,
     );
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround shoots from the newest master when the sheet was re-run", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
-    await db.insertAsset({
+    const character = await seedCharacter(store);
+    await store.insertAsset({
       characterId: character.id,
       kind: "master",
       falRequestId: "req-master-2",
@@ -357,23 +354,22 @@ test("runTurnaround shoots from the newest master when the sheet was re-run", as
     });
     const { generator, calls } = fakeGenerator();
     await runTurnaround(character, {
-      db,
+      store,
       generator,
-      mediaDir,
       fetchImpl: fakeFetch(),
       angles: [0],
     });
     assert.equal(calls[0]?.imageUrl, "https://fal.media/master-2.png");
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround with one failing angle keeps the others and marks error", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     // The generator fails the 3rd angle it is called with; workers start in
     // angle order, so that is angle 90.
     const { generator } = fakeGenerator({ failIndex: 2 });
@@ -381,21 +377,20 @@ test("runTurnaround with one failing angle keeps the others and marks error", as
     await assert.rejects(
       () =>
         runTurnaround(character, {
-          db,
+          store,
           generator,
-          mediaDir,
           fetchImpl: fakeFetch(),
           angles: [0, 45, 90, 135],
         }),
       /turnaround: 1 of 4 angles failed — 90° \(angle 90 boom\)/u,
     );
 
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "error");
 
     // Every angle but the failed one landed with its request id (arrival order
     // isn't deterministic under concurrency, so compare by kind).
-    const stored = await db.getAssets(character.id);
+    const stored = await store.getAssets(character.id);
     const byKind = new Map(
       stored.filter((a) => a.kind.startsWith("angle_")).map((a) => [a.kind, a.falRequestId]),
     );
@@ -404,27 +399,27 @@ test("runTurnaround with one failing angle keeps the others and marks error", as
     assert.equal(byKind.get("angle_135"), "req-angle-135");
     assert.equal(byKind.has("angle_90"), false);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround persists the request_id when a frame download fails (row survives, path null)", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const { generator } = fakeGenerator();
     const fetchImpl = fakeFetch(new Set(["https://fal.media/angle-45.png"]));
 
     await assert.rejects(
-      () => runTurnaround(character, { db, generator, mediaDir, fetchImpl, angles: [0, 45, 90] }),
+      () => runTurnaround(character, { store, generator, fetchImpl, angles: [0, 45, 90] }),
       /Failed to download image \(HTTP 404\)/u,
     );
 
-    const refreshed = await db.getCharacter(character.id);
+    const refreshed = await store.getCharacter(character.id);
     assert.equal(refreshed?.status.turnaround, "error");
 
-    const stored = await db.getAssets(character.id);
+    const stored = await store.getAssets(character.id);
     const angle0 = stored.find((a) => a.kind === "angle_0");
     const angle45 = stored.find((a) => a.kind === "angle_45");
     const angle90 = stored.find((a) => a.kind === "angle_90");
@@ -435,37 +430,41 @@ test("runTurnaround persists the request_id when a frame download fails (row sur
     assert.equal(angle45?.falRequestId, "req-angle-45");
     assert.equal(angle45?.localPath, null);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("runTurnaround refuses an invalid identifier before any generation", async () => {
-  const { db, dir, mediaDir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db);
+    const character = await seedCharacter(store);
     const hostile = { ...character, identifier: "../escape" };
     const { generator, calls } = fakeGenerator();
     await assert.rejects(
-      () => runTurnaround(hostile, { db, generator, mediaDir, fetchImpl: fakeFetch() }),
+      () => runTurnaround(hostile, { store, generator, fetchImpl: fakeFetch() }),
       /invalid identifier/u,
     );
     assert.equal(calls.length, 0);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("findMasterUrl returns null when no master asset has a URL", async () => {
-  const { db, dir } = setup();
+  const { store, dir } = setup();
   try {
-    const character = await seedCharacter(db, false);
-    assert.equal(await findMasterUrl(db, character.id), null);
-    await db.insertAsset({ characterId: character.id, kind: "expression", url: "https://x/y.png" });
-    assert.equal(await findMasterUrl(db, character.id), null);
+    const character = await seedCharacter(store, false);
+    assert.equal(await findMasterUrl(store, character.id), null);
+    await store.insertAsset({
+      characterId: character.id,
+      kind: "expression",
+      url: "https://x/y.png",
+    });
+    assert.equal(await findMasterUrl(store, character.id), null);
   } finally {
-    db.close();
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

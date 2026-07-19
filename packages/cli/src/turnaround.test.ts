@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { openDatabase, parseGalleryData } from "@character-gen/engine";
-import type { AngleGenerator, Database } from "@character-gen/engine";
+import { openStore, parseGalleryData } from "@character-gen/engine";
+import type { AngleGenerator, CharacterStore } from "@character-gen/engine";
 import { cmdTurnaround } from "./pipeline.ts";
 
 /** An angle generator that always fails (offline). */
@@ -14,21 +14,21 @@ const failingGenerator: AngleGenerator = {
 };
 
 async function seedCharacter(dir: string, withMaster: boolean): Promise<void> {
-  const db: Database = openDatabase(join(dir, "db.sqlite"));
-  const character = await db.insertCharacter({
+  const store: CharacterStore = openStore(join(dir, "characters"));
+  const character = await store.insertCharacter({
     identifier: "isolde-keeper",
     name: "Isolde",
     profile: { name: "Isolde", identifier: "isolde-keeper" },
   });
   if (withMaster) {
-    await db.insertAsset({
+    await store.insertAsset({
       characterId: character.id,
       kind: "master",
       falRequestId: "req-master",
       url: "https://fal.media/master.png",
     });
   }
-  db.close();
+  store.close();
 }
 
 test("turnaround without a master exits 1 pointing at the sheet command", async () => {
@@ -40,13 +40,13 @@ test("turnaround without a master exits 1 pointing at the sheet command", async 
       generator: failingGenerator,
     });
     assert.equal(code, 1);
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("isolde-keeper");
+      const character = await store.getCharacter("isolde-keeper");
       // Preconditions failed before the step started, so it never left pending.
       assert.equal(character?.status.turnaround, "pending");
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -96,17 +96,17 @@ test("a successful turnaround records the 12 frames through the CLI seam", async
       generator: okGenerator,
     });
     assert.equal(code, 0);
-    const db = openDatabase(join(dir, "db.sqlite"));
+    const store = openStore(join(dir, "characters"));
     try {
-      const character = await db.getCharacter("isolde-keeper");
+      const character = await store.getCharacter("isolde-keeper");
       assert.ok(character);
       assert.equal(character.status.turnaround, "done");
-      const assets = await db.getAssets(character.id);
+      const assets = await store.getAssets(character.id);
       const angles = assets.filter((a) => a.kind.startsWith("angle_"));
       assert.equal(angles.length, 12);
       assert.ok(angles.every((a) => a.localPath !== null));
     } finally {
-      db.close();
+      store.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

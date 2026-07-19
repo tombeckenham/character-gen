@@ -2,10 +2,10 @@
 // download/store path for generated images and the step-status bookkeeping.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isValidIdentifier } from "../character.ts";
+import { isValidIdentifier } from "../types.ts";
 import type { FetchImpl } from "../fal.ts";
 import type { AssetRecord, CharacterRecord, PipelineStep } from "../types.ts";
-import type { Database } from "../db/index.ts";
+import type { CharacterStore } from "../store/index.ts";
 
 /** Default per-image download timeout — generous vs. falRest's 10s: a multi-MB
  * PNG fetch legitimately takes longer. */
@@ -100,11 +100,11 @@ export interface GenProgress {
   status: string;
 }
 
-/** The dependencies every media-producing step shares. */
+/** The dependencies every media-producing step shares. Media locations come
+ * from the store itself (`store.characterDir`), so a step can never write
+ * files to a different root than the one character.json paths resolve against. */
 export interface StepMediaDeps {
-  db: Database;
-  /** State media root; per-character files go under `<mediaDir>/<identifier>/`. */
-  mediaDir: string;
+  store: CharacterStore;
   /** Injectable downloader so tests avoid the network (defaults to global fetch). */
   fetchImpl?: FetchImpl;
   /** Per-asset download timeout (defaults to DEFAULT_DOWNLOAD_TIMEOUT_MS). */
@@ -159,7 +159,7 @@ export function dedupedReporter(sink?: (message: string) => void): (message: str
  */
 export function ensureCharacterMediaDir(
   character: CharacterRecord,
-  mediaDir: string,
+  store: CharacterStore,
   step: PipelineStep,
 ): string {
   if (!isValidIdentifier(character.identifier)) {
@@ -167,7 +167,7 @@ export function ensureCharacterMediaDir(
       `Refusing to run ${step} for an invalid identifier: "${character.identifier}".`,
     );
   }
-  const charDir = join(mediaDir, character.identifier);
+  const charDir = store.characterDir(character.identifier);
   mkdirSync(charDir, { recursive: true });
   return charDir;
 }
@@ -179,21 +179,21 @@ export function ensureCharacterMediaDir(
  * work error is rethrown — the status write must never mask the real failure.
  */
 export async function withStepStatus<T>(
-  db: Database,
+  store: CharacterStore,
   characterId: string,
   step: PipelineStep,
   report: (message: string) => void,
   work: () => Promise<T>,
 ): Promise<T> {
-  await db.setStepState(characterId, step, "running");
+  await store.setStepState(characterId, step, "running");
   try {
     const result = await work();
-    await db.setStepState(characterId, step, "done");
+    await store.setStepState(characterId, step, "done");
     report(`${step}: done`);
     return result;
   } catch (error) {
     try {
-      await db.setStepState(characterId, step, "error");
+      await store.setStepState(characterId, step, "error");
     } catch (statusError) {
       report(
         `warning: could not mark ${step} failed: ${
@@ -227,13 +227,14 @@ export interface StoreAssetArgs {
 }
 
 /**
- * Records the asset row FIRST (with the billed fal request_id), then downloads
- * the file and patches in the local path. A download failure leaves the row with
- * a null `local_path` so the request_id stays referenceable for publish/retry.
+ * Records the asset record FIRST (with the billed fal request_id), then
+ * downloads the file and patches in the local path. A download failure leaves
+ * the record with a null `localPath` so the request_id stays referenceable for
+ * publish/retry.
  */
 export async function storeAsset(args: StoreAssetArgs): Promise<AssetRecord> {
   const { deps, character, charDir, kind, fileName, image, meta } = args;
-  const asset = await deps.db.insertAsset({
+  const asset = await deps.store.insertAsset({
     characterId: character.id,
     kind,
     falRequestId: image.requestId,
@@ -248,5 +249,5 @@ export async function storeAsset(args: StoreAssetArgs): Promise<AssetRecord> {
     deps.fetchImpl ?? fetch,
     deps.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS,
   );
-  return deps.db.setAssetLocalPath(asset.id, localPath);
+  return deps.store.setAssetLocalPath(asset.id, localPath);
 }

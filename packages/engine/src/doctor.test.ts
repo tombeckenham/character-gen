@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeVersionOk, runDoctor } from "./doctor.ts";
@@ -17,12 +17,12 @@ function statusFetch(status: number): FetchImpl {
   return (() => Promise.resolve(new Response("{}", { status }))) as unknown as FetchImpl;
 }
 
-test("nodeVersionOk enforces the >= 22.13 floor", () => {
-  assert.equal(nodeVersionOk("22.13.0"), true);
-  assert.equal(nodeVersionOk("22.13.1"), true);
+test("nodeVersionOk enforces the >= 22.18 floor", () => {
+  assert.equal(nodeVersionOk("22.18.0"), true);
+  assert.equal(nodeVersionOk("22.18.1"), true);
   assert.equal(nodeVersionOk("24.13.1"), true);
-  assert.equal(nodeVersionOk("23.4.0"), true);
-  assert.equal(nodeVersionOk("22.12.0"), false);
+  assert.equal(nodeVersionOk("23.6.0"), true);
+  assert.equal(nodeVersionOk("22.17.0"), false);
   assert.equal(nodeVersionOk("20.0.0"), false);
   assert.equal(nodeVersionOk("garbage"), false);
 });
@@ -37,7 +37,7 @@ test("runDoctor reports healthy with an env key and a passing ping", async () =>
     assert.equal(report.keySource, "env");
     assert.ok(report.ping);
     assert.equal(report.ping.ok, true);
-    assert.equal(report.dbOk, true);
+    assert.equal(report.storeOk, true);
     assert.equal(report.stateDir, dir);
     // healthy iff Node is also new enough (true on the supported runtime).
     assert.equal(report.healthy, report.nodeOk);
@@ -80,25 +80,55 @@ test("runDoctor with no key skips the ping and is unhealthy", async () => {
     });
     assert.equal(report.keySource, null);
     assert.equal(report.ping, null);
-    assert.equal(report.dbOk, true);
+    assert.equal(report.storeOk, true);
     assert.equal(report.healthy, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("runDoctor reports a DB failure when the db path is unopenable", async () => {
+test("runDoctor reports a store failure when the characters path is unreadable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chargen-doctor-"));
   try {
-    // A directory where db.sqlite should be forces openDatabase to fail.
-    mkdirSync(join(dir, "db.sqlite"));
+    // A plain file where the characters/ directory should be forces the
+    // store's listCharacters scan to fail.
+    writeFileSync(join(dir, "characters"), "not a directory");
     const report = await runDoctor({
       env: { FAL_KEY: "env-key", CHARACTER_GEN_HOME: dir },
       fetchImpl: okFetch(),
     });
-    assert.equal(report.dbOk, false);
-    assert.ok(report.dbError && report.dbError.length > 0);
+    assert.equal(report.storeOk, false);
+    assert.ok(report.storeError && report.storeError.length > 0);
     assert.equal(report.healthy, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runDoctor names a corrupt character folder and reports the store unhealthy", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-doctor-"));
+  try {
+    const brokenDir = join(dir, "characters", "broken");
+    mkdirSync(brokenDir, { recursive: true });
+    writeFileSync(join(brokenDir, "character.json"), "not json");
+    const report = await runDoctor({
+      env: { FAL_KEY: "env-key", CHARACTER_GEN_HOME: dir },
+      fetchImpl: okFetch(),
+    });
+    assert.equal(report.storeOk, false);
+    assert.ok(report.storeError);
+    assert.match(report.storeError, /broken/u);
+    assert.equal(report.healthy, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runDoctor never creates the characters directory just by being run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-doctor-"));
+  try {
+    await runDoctor({ env: { FAL_KEY: "env-key", CHARACTER_GEN_HOME: dir }, fetchImpl: okFetch() });
+    assert.equal(existsSync(join(dir, "characters")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

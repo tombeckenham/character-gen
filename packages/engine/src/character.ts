@@ -1,6 +1,7 @@
-import { emptyStatus } from "./types.ts";
+import { emptyStatus, MAX_IDENTIFIER_LENGTH } from "./types.ts";
 import type { CharacterProfile, CharacterRecord, StepState } from "./types.ts";
-import type { Database } from "./db/index.ts";
+import { DuplicateIdentifierError } from "./store/index.ts";
+import type { CharacterStore } from "./store/index.ts";
 
 /** Optional free-form string fields on a profile; validated only for type. */
 const OPTIONAL_STRING_FIELDS = [
@@ -24,26 +25,12 @@ const STRING_ARRAY_FIELDS = [
  * allows the numeric `heightCm`). */
 const STRING_BAG_FIELDS = ["physical", "motion"] as const;
 
-/** A well-formed identifier: a lowercase slug of letters, digits, and hyphens. */
+/** A well-formed identifier: a lowercase slug of letters, digits, and hyphens.
+ * (The shared validator itself lives in types.ts — see isValidIdentifier.) */
 const IDENTIFIER_RE = /^[a-z0-9-]+$/u;
-
-const MAX_IDENTIFIER_LENGTH = 64;
 
 /** Cap on a derived display name before it is truncated with an ellipsis. */
 const MAX_DERIVED_NAME_LENGTH = 60;
-
-/**
- * True when `identifier` is a well-formed slug the engine will trust in a file
- * path: non-empty, within the length cap, and only `[a-z0-9-]`. Notably rejects
- * `/`, `.`, and `..`, so it doubles as a path-traversal guard.
- */
-export function isValidIdentifier(identifier: string): boolean {
-  return (
-    identifier.length > 0 &&
-    identifier.length <= MAX_IDENTIFIER_LENGTH &&
-    IDENTIFIER_RE.test(identifier)
-  );
-}
 
 /**
  * Turns arbitrary text into a lowercase hyphen slug suitable for an identifier:
@@ -174,35 +161,21 @@ export function validateProfile(raw: unknown): CharacterProfile {
 }
 
 /**
- * True when `err` (or anything in its `cause` chain) is a SQLite UNIQUE
- * constraint failure. Drizzle wraps the driver error, putting the real
- * "UNIQUE constraint failed" text on `cause` — see db/index.test.ts.
- */
-export function isUniqueConstraintError(err: unknown): boolean {
-  let current: unknown = err;
-  while (current instanceof Error) {
-    if (/UNIQUE constraint failed/iu.test(current.message)) return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
-/**
  * Builds an identifier from `base` that is unique against existing characters,
  * appending `-2`, `-3`, … when taken. The stem is truncated to leave room for
  * the suffix and re-trimmed so a cut landing on a hyphen can't emit `foo--2` or
  * exceed the length cap — which also prevents the fixed-point hang when `base`
  * is already MAX_IDENTIFIER_LENGTH chars.
  */
-async function uniqueIdentifier(db: Database, base: string): Promise<string> {
-  if (!(await db.getCharacter(base))) return base;
+async function uniqueIdentifier(store: CharacterStore, base: string): Promise<string> {
+  if (!(await store.getCharacter(base))) return base;
   for (let suffix = 2; ; suffix += 1) {
     const marker = `-${suffix}`;
     const stem = base.slice(0, MAX_IDENTIFIER_LENGTH - marker.length).replaceAll(/-+$/gu, "");
     const candidate = `${stem}${marker}`;
     // Sequential by nature: each candidate depends on the previous lookup miss.
     // oxlint-disable-next-line no-await-in-loop
-    if (!(await db.getCharacter(candidate))) return candidate;
+    if (!(await store.getCharacter(candidate))) return candidate;
   }
 }
 
@@ -213,7 +186,7 @@ async function uniqueIdentifier(db: Database, base: string): Promise<string> {
  * derived — reaches `createCharacter` through the same guard.
  */
 export async function deriveMinimalProfile(
-  db: Database,
+  store: CharacterStore,
   description: string,
 ): Promise<CharacterProfile> {
   const trimmed = description.trim();
@@ -222,29 +195,30 @@ export async function deriveMinimalProfile(
       ? `${trimmed.slice(0, MAX_DERIVED_NAME_LENGTH - 1).trimEnd()}…`
       : trimmed;
   const base = slugify(trimmed) || "character";
-  const identifier = await uniqueIdentifier(db, base);
+  const identifier = await uniqueIdentifier(store, base);
   return validateProfile({ name, identifier, description: trimmed });
 }
 
 /**
  * Persists a new character from an already-validated profile, marking the
  * `profile` step done (Claude authored it up front). A duplicate identifier
- * surfaces as a friendly error rather than the raw SQLITE_CONSTRAINT.
+ * surfaces as a friendly error rather than the store's raw folder-exists error.
  */
 export async function createCharacter(
-  db: Database,
+  store: CharacterStore,
   profile: CharacterProfile,
 ): Promise<CharacterRecord> {
   const status = { ...emptyStatus(), profile: "done" as StepState };
   try {
-    return await db.insertCharacter({
+    return await store.insertCharacter({
       identifier: profile.identifier,
       name: profile.name,
       profile,
       status,
     });
   } catch (error) {
-    if (isUniqueConstraintError(error)) {
+    if (error instanceof DuplicateIdentifierError) {
+      // oxlint-disable-next-line prefer-type-error -- maps a store error to a user-facing message; not a type violation
       throw new Error(
         `A character with identifier "${profile.identifier}" already exists. Choose a different identifier.`,
         { cause: error },

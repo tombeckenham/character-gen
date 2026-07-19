@@ -2,6 +2,25 @@
 // No enums/namespaces — erasableSyntaxOnly rejects them; string unions + `as
 // const` arrays instead.
 
+/** A well-formed identifier: a lowercase slug of letters, digits, and hyphens. */
+const IDENTIFIER_RE = /^[a-z0-9-]+$/u;
+
+export const MAX_IDENTIFIER_LENGTH = 64;
+
+/**
+ * True when `identifier` is a well-formed slug the engine will trust in a file
+ * path: non-empty, within the length cap, and only `[a-z0-9-]`. Notably rejects
+ * `/`, `.`, and `..`, so it doubles as a path-traversal guard. Lives here (not
+ * character.ts) so the store can use it without an import cycle.
+ */
+export function isValidIdentifier(identifier: string): boolean {
+  return (
+    identifier.length > 0 &&
+    identifier.length <= MAX_IDENTIFIER_LENGTH &&
+    IDENTIFIER_RE.test(identifier)
+  );
+}
+
 /** The angles the turnaround step generates: a 12-frame ring at 30°. */
 export const TURNAROUND_ANGLES = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] as const;
 

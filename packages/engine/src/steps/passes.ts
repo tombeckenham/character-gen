@@ -289,18 +289,18 @@ export async function runSheetPasses(
   deps: RunSheetPassesDeps,
 ): Promise<SheetPassesOutcome> {
   const report = dedupedReporter(deps.onProgress);
-  const charDir = ensureCharacterMediaDir(character, deps.mediaDir, "sheet");
+  const charDir = ensureCharacterMediaDir(character, deps.store, "sheet");
   const passes = SHEET_PASSES.filter((pass) => deps.passes.includes(pass));
   const detailCap = deps.detailCap ?? MAX_DETAIL_MACROS;
 
-  const masterUrl = await findMasterUrl(deps.db, character.id);
+  const masterUrl = await findMasterUrl(deps.store, character.id);
   if (masterUrl === null) {
     throw new Error(
       `No master image found for "${character.identifier}" — run \`character-gen sheet ${character.identifier}\` first.`,
     );
   }
 
-  return withStepStatus(deps.db, character.id, "sheet", report, async () => {
+  return withStepStatus(deps.store, character.id, "sheet", report, async () => {
     const flat = flattenShots(passes, character.profile, detailCap);
     const ctx: ShotContext = { deps, character, charDir, masterUrl, report };
     const { results, failures } = await mapPool(

@@ -107,7 +107,7 @@ test("reduceGalleryPoll keeps object identity when the version is unchanged", ()
 });
 
 test("reduceGalleryPoll deliberately ignores changed content under an equal version", () => {
-  // The atomic version counter makes this near-impossible in practice; if it
+  // A 48-bit content-hash collision makes this near-impossible in practice; if it
   // ever happens, the version is the contract — content under the same
   // version is treated as identical and NOT re-rendered.
   const current = payload(2);

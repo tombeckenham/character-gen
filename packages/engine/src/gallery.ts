@@ -10,14 +10,11 @@ import {
 import { createHash } from "node:crypto";
 import { join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isValidIdentifier } from "./character.ts";
+import { isValidIdentifier } from "./types.ts";
 import { ASSET_ANNOTATION_FIELDS, DATA_GLOBAL, OPTIONAL_PROFILE_FIELDS } from "./gallery-data.ts";
 import type { GalleryAssetEntry, GalleryCharacter, GalleryData } from "./gallery-data.ts";
 import type { AssetRecord, CharacterRecord } from "./types.ts";
-import type { Database } from "./db/index.ts";
-
-/** Settings key holding the monotonically increasing gallery version counter. */
-export const GALLERY_VERSION_KEY = "gallery_version";
+import type { CharacterStore } from "./store/index.ts";
 
 /** Error message when neither a built SPA nor a previously written gallery
  * page exists. Kept as a constant so the CLI/tests match it exactly. */
@@ -30,8 +27,8 @@ export function defaultSpaHtmlPath(): string {
 }
 
 export interface GalleryWriteDeps {
-  db: Database;
-  /** Target directory, `<state>/gallery` (created if absent). */
+  store: CharacterStore;
+  /** Target directory, `<cwd>/gallery` (created if absent). */
   galleryDir: string;
   /** Override the built SPA index.html location (tests). */
   spaHtmlPath?: string;
@@ -78,7 +75,7 @@ function copyContentAddressed(sourcePath: string, destDir: string): string {
 /**
  * Copies a character's downloadable assets into `<galleryDir>/media/<identifier>/`
  * and returns their gallery-relative entries. Assets without a local file (failed
- * downloads have a null `local_path`, per the sheet step) are skipped; a vanished
+ * downloads have a null `localPath`, per the sheet step) are skipped; a vanished
  * file or a failed copy is skipped with a warning — one bad asset must never
  * abort the whole gallery write.
  */
@@ -137,6 +134,15 @@ function toGalleryCharacter(character: CharacterRecord, assets: GalleryAssetEntr
   return entry;
 }
 
+/** The gallery payload's version: a positive-integer digest of the characters
+ * content, so equal content always maps to an equal version. */
+function contentVersion(characters: GalleryCharacter[]): number {
+  const digest = createHash("sha256").update(JSON.stringify(characters)).digest("hex");
+  // 12 hex chars (48 bits) stay well inside Number's safe-integer range; +1
+  // keeps the value ≥ 1, which parseGalleryData requires.
+  return Number.parseInt(digest.slice(0, 12), 16) + 1;
+}
+
 /** Writes `data.js` via a same-directory temp file + rename (atomic on the same
  * filesystem), so the polling page never sees a torn file. */
 function writeDataFile(galleryDir: string, payload: GalleryData): string {
@@ -171,7 +177,7 @@ export async function writeGallery(deps: GalleryWriteDeps): Promise<GalleryWrite
     throw new Error(GALLERY_NOT_BUILT);
   }
 
-  const records = await deps.db.listCharacters();
+  const records = await deps.store.listCharacters();
   const characters: GalleryCharacter[] = [];
   for (const character of records) {
     // Never trust a stored identifier in a file path (defense in depth).
@@ -179,17 +185,18 @@ export async function writeGallery(deps: GalleryWriteDeps): Promise<GalleryWrite
       warn(`gallery: skipping character with invalid identifier "${character.identifier}"`);
       continue;
     }
-    // Sequential by design: each iteration is one local DB read plus local
+    // Sequential by design: each iteration is one local store read plus local
     // file copies for that character.
     // oxlint-disable-next-line no-await-in-loop
-    const assets = await deps.db.getAssets(character.id);
+    const assets = await deps.store.getAssets(character.id);
     characters.push(toGalleryCharacter(character, copyAssets(character, assets, galleryDir, warn)));
   }
 
-  // Bumped atomically in the DB so concurrent writers always mint distinct,
-  // strictly increasing versions.
+  // A content hash of the payload: stateless (no counter to store), and it
+  // changes exactly when the rendered content changes, so the polling page
+  // re-renders precisely on real updates.
   const payload: GalleryData = {
-    version: await deps.db.bumpCounter(GALLERY_VERSION_KEY),
+    version: contentVersion(characters),
     characters,
   };
   const dataFile = writeDataFile(galleryDir, payload);
