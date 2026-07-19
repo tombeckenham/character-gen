@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "@character-gen/engine";
@@ -134,4 +134,135 @@ test("an unimplemented pipeline command exits 1 with a coming-soon note", () => 
   const res = runCli(["turnaround", "someone"]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /coming soon/u);
+});
+
+test("create with --steps profile derives a minimal profile and persists it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /Created A Lighthouse Keeper \(a-lighthouse-keeper\)/u);
+    const db = openDatabase(join(dir, "db.sqlite"));
+    try {
+      const character = await db.getCharacter("a-lighthouse-keeper");
+      assert.ok(character);
+      assert.equal(character.status.profile, "done");
+      assert.equal(character.status.sheet, "pending");
+      assert.equal(character.profile["description"], "A Lighthouse Keeper");
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create derivation suffixes the identifier when the slug is taken", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const db = openDatabase(join(dir, "db.sqlite"));
+    await db.insertCharacter({
+      identifier: "a-lighthouse-keeper",
+      name: "Existing",
+      profile: { name: "Existing", identifier: "a-lighthouse-keeper" },
+    });
+    db.close();
+    const res = runCliIn(dir, ["create", "A Lighthouse Keeper", "--steps", "profile"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /a-lighthouse-keeper-2/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create with no description and no --profile-json exits 1 with usage", () => {
+  const res = runCli(["create", "--steps", "profile"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Usage: character-gen create/u);
+});
+
+test("create --profile-json with a missing file exits 1", () => {
+  const res = runCli(["create", "--profile-json", "/no/such/file.json", "--steps", "profile"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Could not read profile file/u);
+});
+
+test("create --profile-json with invalid JSON exits 1", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const file = join(dir, "bad.json");
+    writeFileSync(file, "{ not json");
+    const res = runCliIn(dir, ["create", "--profile-json", file, "--steps", "profile"]);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not valid JSON/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create --profile-json with an invalid profile shape exits 1", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const file = join(dir, "profile.json");
+    writeFileSync(file, JSON.stringify({ name: "X", identifier: "Bad Slug" }));
+    const res = runCliIn(dir, ["create", "--profile-json", file, "--steps", "profile"]);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Invalid profile/u);
+    assert.match(res.stderr, /must be a slug/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create --steps with a later-phase step exits 1 with a coming-soon note", () => {
+  const res = runCli(["create", "someone", "--steps", "turnaround"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /coming in a later phase/u);
+});
+
+test("create --steps with an unknown step exits 1", () => {
+  const res = runCli(["create", "someone", "--steps", "frobnicate"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Unknown step "frobnicate"/u);
+});
+
+test("create --surprise points to the create-character skill", () => {
+  const res = runCli(["create", "someone", "--surprise"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /create-character skill/u);
+});
+
+test("create (default steps) with a valid profile but no key creates then fails at sheet", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chargen-cli-"));
+  try {
+    const file = join(dir, "profile.json");
+    writeFileSync(file, JSON.stringify({ name: "Isolde", identifier: "isolde-keeper" }));
+    const res = runCliIn(dir, ["create", "--profile-json", file]);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /Created Isolde \(isolde-keeper\)/u);
+    assert.match(res.stderr, /No fal API key found/u);
+    // The character persisted even though the sheet step could not run.
+    const db = openDatabase(join(dir, "db.sqlite"));
+    try {
+      const character = await db.getCharacter("isolde-keeper");
+      assert.ok(character);
+      assert.equal(character.status.sheet, "pending");
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sheet on an unknown character exits 1", () => {
+  const res = runCli(["sheet", "ghost"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /No character found/u);
+});
+
+test("sheet without an argument exits 1 with usage", () => {
+  const res = runCli(["sheet"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Usage: character-gen sheet/u);
 });

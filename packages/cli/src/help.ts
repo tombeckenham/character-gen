@@ -4,10 +4,10 @@ Usage:
   character-gen <command> [options]
 
 Commands:
-  create "<description>"   Invent + run the pipeline for a new character   (coming soon)
+  create "<description>"   Invent + run the pipeline for a new character
   list                     List all characters
   show <id|identifier>     Print a character's profile and assets
-  sheet <char>             (Re)generate master sheet + expressions          (coming soon)
+  sheet <char>             (Re)generate master sheet + expressions
   turnaround <char>        Generate the 8-angle spin frames                  (coming soon)
   voice <char>             Design the character's signature voice            (coming soon)
   speak <char> "<line>"    Speak a line in the character's voice             (coming soon)
@@ -21,8 +21,10 @@ Run 'character-gen <command> --help' for command-specific options.
 `;
 
 export const COMMAND_HELP: Record<string, string> = {
-  create: `character-gen create "<description>" [--profile-json <file>] [--surprise] [--steps <list>]
-  Invent a profile (or take one via --profile-json) and run the pipeline.`,
+  create: `character-gen create "<description>" [--profile-json <file>] [--steps <list>]
+  Invent a profile (or take one via --profile-json) and run the pipeline.
+  Steps available now: profile, sheet (default: both). --surprise is handled
+  by the create-character skill.`,
   list: `character-gen list
   List all locally stored characters.`,
   show: `character-gen show <id|identifier>
