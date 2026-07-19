@@ -16,11 +16,13 @@ Claude Code (skills) ──run──▶ character-gen CLI ──▶ fal APIs (on
                               browser (file://) polls data.js every 2s
 ```
 
-- **`packages/engine`** — TypeScript library: fal client, key resolution, SQLite (Drizzle + better-sqlite3), pipeline steps, gallery writer.
+- **`packages/engine`** — TypeScript library: fal client, key resolution, SQLite via the built-in `node:sqlite` driver with Drizzle (`drizzle-orm/node-sqlite`) — zero native modules, nothing for the installer to compile. Pipeline steps, gallery writer.
 - **`packages/cli`** — thin command wrapper (`character-gen …`) over the engine. Shimmed into `~/.local/bin` by the installer (same trick genmedia uses).
 - **`gallery-app/`** — React + TanStack Router SPA compiled to a **single self-contained HTML file** (Vite + `vite-plugin-singlefile`; ES modules and `fetch()` are blocked on `file://`, so everything is inlined). The CLI copies the built `index.html` into the gallery dir.
 - **`skills/`** — Claude Code skills (markdown) that call the CLI.
 - **`install.sh`** — curl installer: clone, `pnpm install && pnpm build`, shim CLI, install skills into `~/.claude/skills`, detect fal key.
+
+**Runtime requirement: Node ≥ 22.13 (target Node 24 LTS).** `node:sqlite` is unflagged from 22.13/23.4 and built into Node 24. The installer checks `node --version` up front and fails with an install hint; `engines` in package.json enforces it. No native modules anywhere in the dependency tree (no better-sqlite3, no node-gyp) — the biggest `curl | sh` failure mode is designed out. Stretch: `bun build --compile` standalone binary (the same trick genmedia ships with) for a zero-prerequisite install.
 
 ### The live static gallery (no server)
 
