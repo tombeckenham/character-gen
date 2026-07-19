@@ -8,10 +8,15 @@ Agent-first character generator for the fal.ai hackathon. You sit in Claude Code
 
 ### 1. Add the Claude Code plugin
 
-In Claude Code, register this repo as a plugin marketplace and install the plugin:
+In Claude Code, register this repo as a plugin marketplace:
 
 ```
 /plugin marketplace add tombeckenham/character-gen
+```
+
+Then install the plugin:
+
+```
 /plugin install character-gen@character-gen
 ```
 
