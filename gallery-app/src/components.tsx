@@ -1,10 +1,11 @@
-import { PIPELINE_STEPS } from "@character-gen/engine/gallery-data";
+import { PIPELINE_STEPS, selectSpinnerFrames } from "@character-gen/engine/gallery-data";
 import type {
   GalleryAssetEntry,
   GalleryCharacter,
   StepState,
 } from "@character-gen/engine/gallery-data";
 import { Badge } from "@/components/ui/badge";
+import { TurnaroundSpinner } from "./Spinner.tsx";
 
 const STEP_BADGE: Record<StepState, string> = {
   pending: "border-border bg-transparent text-muted-foreground/70",
@@ -40,8 +41,13 @@ export function heroAsset(character: GalleryCharacter): GalleryAssetEntry | unde
   );
 }
 
-/** The card hero image: face_front > master > a monogram placeholder. */
+/** The card hero: the drag-to-scrub spinner when turnaround frames exist,
+ * else face_front > master > a monogram placeholder. */
 export function Portrait({ character }: { character: GalleryCharacter }) {
+  const frames = selectSpinnerFrames(character.assets);
+  if (frames.length > 0) {
+    return <TurnaroundSpinner frames={frames} name={character.name} variant="card" />;
+  }
   const hero = heroAsset(character);
   if (hero) {
     return (
